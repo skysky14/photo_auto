@@ -1,11 +1,13 @@
 """카카오 로컬 API로 좌표 → 주소명(구/시 + 동/읍/면). 조회 결과는 SQLite에 캐시한다."""
 import json
+import logging
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from . import namer
 
+log = logging.getLogger("photoai.geo")
 URL = "https://dapi.kakao.com/v2/local/geo/coord2regioncode.json"
 
 
@@ -34,7 +36,11 @@ class Geo:
         try:
             with urllib.request.urlopen(req, timeout=10) as r:
                 docs = json.load(r).get("documents", [])
-        except (urllib.error.URLError, TimeoutError, ValueError):
+        except urllib.error.HTTPError as e:  # 키/서비스 설정 오류는 본문에 이유가 있다
+            log.error("카카오 API HTTP %s (%s,%s): %s", e.code, lat, lon, e.read().decode("utf-8", "replace"))
+            return None
+        except (urllib.error.URLError, TimeoutError, ValueError) as e:
+            log.error("카카오 API 호출 실패 (%s,%s): %r", lat, lon, e)
             return None
         return parse_regions(docs)
 

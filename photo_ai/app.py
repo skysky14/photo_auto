@@ -1,4 +1,5 @@
 """CustomTkinter GUI. 처리는 백그라운드 스레드, 진행 상황은 queue로 전달해 메인 스레드가 갱신한다."""
+import logging
 import queue
 import threading
 from pathlib import Path
@@ -6,13 +7,21 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from . import ai, config, db as dbm, geo, organizer
+from . import ai, config, db as dbm, geo, log as logsetup, organizer
+
+log = logging.getLogger("photoai.app")
 
 STAT_ROWS = [
     ("처리 사진 수", "processed"), ("카카오 API 호출", "kakao_calls"), ("GPS 캐시 적중", "gps_cache_hits"),
     ("Ollama 분석", "ollama_calls"), ("AI 성공", "ai_success"), ("AI 실패", "ai_fail"),
     ("분류불가", "unclassified"), ("중복파일", "duplicates"), ("실패", "failed"),
 ]
+
+
+def fmt_sec(s: float) -> str:
+    m, sec = divmod(int(s), 60)
+    h, m = divmod(m, 60)
+    return f"{h}시간 {m}분 {sec}초" if h else f"{m}분 {sec}초" if m else f"{s:.1f}초"
 
 
 class App(ctk.CTk):
@@ -71,6 +80,8 @@ class App(ctk.CTk):
         self.rate = ctk.CTkLabel(box, text="GPS 캐시 적중률: -")
         self.rate.grid(row=len(STAT_ROWS) + 2, column=0, columnspan=3, padx=14, pady=4, sticky="w")
 
+        self.timing = ctk.CTkLabel(self, text="총 소요시간: -   평균: -", anchor="w")
+        self.timing.pack(fill="x", padx=14)
         self.bar = ctk.CTkProgressBar(self)
         self.bar.set(0)
         self.bar.pack(fill="x", padx=12, pady=(10, 2))
@@ -133,6 +144,7 @@ class App(ctk.CTk):
             res = organizer.run(st, self.db, g, lab, lambda *a: self.q.put(("p", *a)), self.cancel)
             self.q.put(("done", res))
         except Exception as e:
+            log.exception("작업 스레드 오류")
             self.q.put(("err", str(e)))
 
     def poll(self):
@@ -151,6 +163,7 @@ class App(ctk.CTk):
                 elif m[0] == "done":
                     r = m[1]
                     self.finish(f"{'취소됨' if r.cancelled else '완료'}: 정상 {r.ok}, 분류불가 {r.unclassified}, 중복 {r.duplicates}, 실패 {r.failed}")
+                    self.timing.configure(text=f"총 소요시간: {fmt_sec(r.total_sec)}   평균: {r.avg_sec:.2f}초/장")
                     self.found.configure(text=str(r.found))
                 else:
                     self.finish("오류")
@@ -187,5 +200,7 @@ class App(ctk.CTk):
 
 
 def main():
+    logsetup.setup()
+    log.info("PhotoAI 시작")
     ctk.set_appearance_mode("system")
     App().mainloop()

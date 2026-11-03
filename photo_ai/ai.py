@@ -1,4 +1,5 @@
 """Ollama 비전 모델로 사진 설명어 생성."""
+import logging
 import os
 import shutil
 import subprocess
@@ -15,6 +16,7 @@ from PIL import Image, ImageOps
 
 from . import namer
 
+log = logging.getLogger("photoai.ai")
 PROMPT = ("이 사진의 핵심 내용을 한국어 명사 하나로 10자 이내로 말해라. "
           "예: 산책중, 가족사진, 일몰풍경, 반려견, 커피사진. 단어만 출력하고 공백·기호·설명은 쓰지 마라.")
 
@@ -139,6 +141,6 @@ def make_labeler(url: str, model: str):
                 if got:
                     return got
             except Exception:
-                pass
+                log.exception("Ollama 분석 실패: %s", path)
         return None
     return label

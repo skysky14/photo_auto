@@ -1,5 +1,6 @@
 """전체 처리 파이프라인: 스캔 → EXIF → 주소명 → AI → 파일명 → 중복 검사 → 검증 후 이동."""
 import hashlib
+import logging
 import os
 import shutil
 import time
@@ -9,6 +10,7 @@ from pathlib import Path
 
 from . import exif, namer
 
+log = logging.getLogger("photoai.organizer")
 DONE, UNCLASSIFIED, DUPLICATE = "정리완료", "분류불가", "중복파일"
 
 
@@ -21,6 +23,8 @@ class Result:
     duplicates: int = 0
     failed: int = 0
     cancelled: bool = False
+    total_sec: float = 0.0
+    avg_sec: float = 0.0
 
 
 def scan(src: Path, result: Path, recursive: bool) -> list[Path]:
@@ -93,6 +97,7 @@ def _process_one(path, st, root, db, job, geo, labeler, res):
         kind = "duplicate"
     move_verified(path, dst)
     db.add_history(job, path, dst, kind)
+    log.info("%s → %s [%s]", path, dst, kind)
     return kind
 
 
@@ -104,6 +109,7 @@ def run(st, db, geo=None, labeler=None, progress=lambda i, n, path, msg: None, c
         sub.mkdir(parents=True, exist_ok=True)
     files = scan(Path(st.source), root, st.recursive)
     res = Result(job_id=job, found=len(files))
+    log.info("작업 시작 job=%s 원본=%s 결과=%s 대상=%d장 geo=%s ai=%s", job, st.source, root, len(files), bool(geo), bool(labeler))
     t0 = time.time()
     counters = {"ok": "ok", "unclassified": "unclassified", "duplicate": "duplicates"}
     for i, path in enumerate(files, 1):
@@ -121,8 +127,14 @@ def run(st, db, geo=None, labeler=None, progress=lambda i, n, path, msg: None, c
             res.failed += 1
             db.add_stat("failed")
             db.log(job, "error", f"{path}: {e}")
+            log.exception("처리 실패: %s", path)
             progress(i, len(files), path, f"failed: {e}")
-    db.add_stat("elapsed_sec", int(time.time() - t0))
+    res.total_sec = time.time() - t0
+    n = res.ok + res.unclassified + res.duplicates + res.failed
+    res.avg_sec = res.total_sec / n if n else 0.0
+    log.info("작업 종료 job=%s 대상=%d 총 %.1fs 평균 %.2fs/장 (정상 %d, 분류불가 %d, 중복 %d, 실패 %d)",
+             job, len(files), res.total_sec, res.avg_sec, res.ok, res.unclassified, res.duplicates, res.failed)
+    db.add_stat("elapsed_sec", int(res.total_sec))
     return res
 
 
