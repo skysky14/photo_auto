@@ -11,3 +11,6 @@ build/
 graphify-out/.graphify_python
 graphify-out/cache/
 logs/
+*.db-shm
+*.db-wal
+*.db-journal
