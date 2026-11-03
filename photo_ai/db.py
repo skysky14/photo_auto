@@ -5,13 +5,17 @@ import uuid
 from datetime import datetime
 
 STAT_NAMES = (
-    "processed", "kakao_calls", "gps_cache_hits", "ollama_calls", "ai_success", "ai_fail",
+    "processed", "geo_hits", "geo_miss", "ollama_calls", "ai_success", "ai_fail",
     "unclassified", "duplicates", "failed", "elapsed_sec",
 )
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS gps_cache(
   id TEXT PRIMARY KEY, key TEXT UNIQUE NOT NULL, place TEXT NOT NULL,
+  updated_at TEXT NOT NULL, synced INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS regions(
+  id TEXT PRIMARY KEY, adm_cd TEXT NOT NULL, sgg TEXT NOT NULL, dong TEXT NOT NULL,
+  minx REAL NOT NULL, miny REAL NOT NULL, maxx REAL NOT NULL, maxy REAL NOT NULL, geom TEXT NOT NULL,
   updated_at TEXT NOT NULL, synced INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS stats(
   id TEXT PRIMARY KEY, day TEXT NOT NULL, name TEXT NOT NULL, value INTEGER NOT NULL DEFAULT 0,
@@ -53,7 +57,27 @@ class DB:
         with self.lock:
             return self.con.execute(sql, args).fetchall()
 
-    # GPS 캐시
+    # 행정동 경계 (geo.download_regions가 채운다)
+    def region_count(self) -> int:
+        return self._query("SELECT COUNT(*) FROM regions")[0][0]
+
+    def region_bboxes(self) -> list[tuple]:
+        return self._query("SELECT id,minx,miny,maxx,maxy FROM regions")
+
+    def region_geom(self, rid: str) -> tuple[str, str, str]:
+        """(시군구, 동, 좌표 JSON)"""
+        return self._query("SELECT sgg,dong,geom FROM regions WHERE id=?", (rid,))[0]
+
+    def replace_regions(self, rows) -> None:
+        """rows: (adm_cd, sgg, dong, minx, miny, maxx, maxy, geom_json). 한 트랜잭션으로 통째 교체."""
+        now = _now()
+        with self.lock, self.con:
+            self.con.execute("DELETE FROM regions")
+            self.con.executemany(
+                "INSERT INTO regions(id,adm_cd,sgg,dong,minx,miny,maxx,maxy,geom,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                [(_id(), *r, now) for r in rows])
+
+    # (사용 중단) 카카오 시절 GPS 캐시
     def cache_get(self, key: str) -> str | None:
         rows = self._query("SELECT place FROM gps_cache WHERE key=?", (key,))
         return rows[0][0] if rows else None

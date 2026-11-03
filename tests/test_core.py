@@ -50,26 +50,50 @@ def test_read_meta(tmp_path):
     assert exif.read_meta(p) == (None, None)
 
 
-def test_parse_regions():
-    docs = [{"region_type": "B", "region_2depth_name": "연수구", "region_3depth_name": "옥련동"},
-            {"region_type": "H", "region_2depth_name": "연수구", "region_3depth_name": "송도동"}]
-    assert geo.parse_regions(docs) == "연수구송도동"
-    assert geo.parse_regions([]) == ""
+SQUARE = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
+HOLE = [[4, 4], [6, 4], [6, 6], [4, 6], [4, 4]]
 
 
-def test_geo_cache(tmp_path, monkeypatch):
+def geojson():
+    def feat(nm, sgg, coords):
+        return {"type": "Feature", "properties": {"adm_nm": nm, "sggnm": sgg, "adm_cd": "1"},
+                "geometry": {"type": "MultiPolygon", "coordinates": coords}}
+    return {"features": [feat("서울특별시 연수구 송도1·4동", "연수구", [[SQUARE, HOLE]]),  # 구멍이 있는 동
+                         feat("서울특별시 연수구 송도2동", "연수구", [[[[4, 4], [6, 4], [6, 6], [4, 6], [4, 4]]]])]}  # 구멍 자리를 채운 동
+
+
+def test_geo_place(tmp_path):
     db = dbm.DB(tmp_path / "t.db")
-    g = geo.Geo("key", db)
-    calls = []
-    monkeypatch.setattr(g, "_fetch", lambda lat, lon: calls.append(1) or "연수구송도동")
-    assert g.place(37.5, 126.6) == "연수구송도동"
-    assert g.place(37.50001, 126.60001) == "연수구송도동"  # 같은 캐시 키
-    assert g.place(37.5009, 126.6009) == "연수구송도동"  # 약 100m 이내는 같은 격자
-    assert len(calls) == 1
-    assert db.stats()[1]["gps_cache_hits"] == 2
-    assert db.cache_get("37.500,126.600") == "연수구송도동"  # 키는 격자 중심 좌표
-    g.place(37.52, 126.6)  # 약 2km 떨어지면 새로 조회
-    assert len(calls) == 2
+    db.replace_regions(geo.parse_geojson(geojson()))
+    g = geo.Geo(db)  # 좌표는 (lon=x, lat=y)
+    assert g.place(lat=2, lon=2) == "연수구송도1.4동"    # 안쪽, 가운뎃점은 카카오 표기처럼 .으로
+    assert g.place(lat=5, lon=5) == "연수구송도2동"      # 1동의 구멍 안은 2동
+    assert g.place(lat=2, lon=11) is None                # 경계 밖
+    assert g.place(lat=11, lon=2) is None
+    hits, miss = db.stats()[1]["geo_hits"], db.stats()[1]["geo_miss"]
+    assert (hits, miss) == (2, 2)
+
+
+def test_download_regions_checks_hash(tmp_path, monkeypatch):
+    import hashlib
+    import io
+    import json
+
+    body = json.dumps(geojson()).encode()
+
+    class Resp(io.BytesIO):
+        headers = {"Content-Length": str(len(body))}
+
+    monkeypatch.setattr(geo.urllib.request, "urlopen", lambda url, timeout=0: Resp(body))
+    db = dbm.DB(tmp_path / "t.db")
+    try:
+        geo.download_regions(db, lambda *a: None, "http://x", "0" * 64)
+        raise AssertionError("해시가 달라도 저장됨")
+    except RuntimeError:
+        pass
+    assert db.region_count() == 0
+    n = geo.download_regions(db, lambda *a: None, "http://x", hashlib.sha256(body).hexdigest())
+    assert n == 2 and db.region_count() == 2
 
 
 def test_pipeline(tmp_path):
@@ -154,3 +178,101 @@ def test_ai_prepare_runs_missing_steps(monkeypatch):
     monkeypatch.setattr(ai, "_pull", lambda u, m, p: calls.append("pull"))
     ai.prepare("http://localhost:11434", "m", lambda *a: None)
     assert calls == ["install", "serve", "pull"]
+
+
+def test_ai_model_list_and_pull_guards(monkeypatch):
+    import pytest
+    from photo_ai import ai
+
+    assert len(ai.MODEL_NAMES) == 10 and len(set(ai.MODEL_NAMES)) == 10
+    assert ai.is_installed({"gemma3:4b"}, "gemma3:4b") and ai.is_installed({"moondream:latest"}, "moondream")
+    assert not ai.is_installed({"gemma3:4b"}, "llava:7b")
+    with pytest.raises(RuntimeError):  # 원격 Ollama에는 설치하지 않는다
+        ai.pull_model("http://10.0.0.5:11434", "gemma3:4b", lambda *a: None)
+    with pytest.raises(RuntimeError):  # 목록 밖 이름은 내려받지 않는다
+        ai._pull("http://localhost:11434", "evil.example.com/x/y", lambda *a: None)
+
+
+def test_installed_models_falls_back_to_disk(tmp_path, monkeypatch):
+    from photo_ai import ai
+
+    d = tmp_path / "manifests" / "registry.ollama.ai" / "library" / "gemma3"
+    d.mkdir(parents=True)
+    (d / "4b").write_text("{}")
+    monkeypatch.setenv("OLLAMA_MODELS", str(tmp_path))
+    monkeypatch.setattr(ai, "_models", lambda url: (_ for _ in ()).throw(ConnectionError()))
+    assert ai.installed_models("http://localhost:11434") == {"gemma3:4b"}  # 서버 꺼짐 → 디스크
+    assert ai.installed_models("http://10.0.0.5:11434") is None            # 원격은 알 수 없음
+
+
+def test_ensure_server(monkeypatch):
+    import pytest
+    from photo_ai import ai
+
+    calls = []
+    monkeypatch.setattr(ai, "_serve", lambda u, p: calls.append("serve"))
+    monkeypatch.setattr(ai, "_models", lambda url: [])
+    ai.ensure_server("http://localhost:11434", lambda *a: None)
+    assert calls == []                                    # 이미 켜져 있으면 그대로
+    monkeypatch.setattr(ai, "_models", lambda url: (_ for _ in ()).throw(ConnectionError()))
+    ai.ensure_server("http://localhost:11434", lambda *a: None)
+    assert calls == ["serve"]                             # 꺼져 있으면 실행
+    with pytest.raises(RuntimeError):                     # 원격은 건드리지 않는다
+        ai.ensure_server("http://10.0.0.5:11434", lambda *a: None)
+
+
+def test_model_info_covers_all_models():
+    from photo_ai import ai
+
+    assert set(ai.MODEL_INFO) == set(ai.MODEL_NAMES)
+    assert all(len(v) == 4 for v in ai.MODEL_INFO.values())
+
+
+def test_labeler_gives_up_when_ollama_is_dead(tmp_path, monkeypatch):
+    import pytest
+    from photo_ai import ai
+
+    class Dead:
+        def __init__(self, **kw): pass
+        def chat(self, **kw): raise TimeoutError
+
+    monkeypatch.setattr(ai.ollama, "Client", Dead)
+    p = tmp_path / "a.jpg"
+    make_jpg(p, "2021:02:16 19:17:25")
+    lab = ai.make_labeler("http://localhost:11434", "m", give_up_after=2)
+    assert lab(p) is None                  # 1장째 실패는 설명어만 생략
+    with pytest.raises(ai.AIUnavailable):  # 연속 2장째에서 포기
+        lab(p)
+
+
+def test_run_stops_when_ai_unavailable(tmp_path):
+    from photo_ai import ai
+
+    st = settings(tmp_path, check_same=True)
+    src = Path(st.source)
+    for i in range(3):
+        make_jpg(src / f"IMG_{i}.jpg", f"2021:02:16 19:17:2{i}")
+
+    def dead(p): raise ai.AIUnavailable("응답 없음")
+
+    res = organizer.run(st, dbm.DB(tmp_path / "t.db"), labeler=dead)
+    assert res.cancelled and res.reason == "응답 없음" and res.ok == 0
+    assert len(list(src.glob("*.jpg"))) == 3  # 아무것도 옮기지 않았다
+
+
+def test_result_lists(tmp_path):
+    st = settings(tmp_path, check_same=True)
+    src = Path(st.source)
+    make_jpg(src / "IMG_1.jpg", "2021:02:16 19:17:25")
+    make_jpg(src / "IMG_2.jpg", "2021:02:16 19:17:25")                      # IMG_1과 같은 내용 → 중복
+    make_jpg(src / "no_date.jpg")
+    (src / "broken.jpg").write_bytes(b"not an image")
+    seen = []
+    res = organizer.run(st, dbm.DB(tmp_path / "t.db"), progress=lambda i, n, p, msg: seen.append((p.name, msg)))
+    assert res.ok_items == [("IMG_1.jpg", "20210216_191725.jpg")]
+    assert res.unclassified_items == ["no_date.jpg"] and res.failed_items == ["broken.jpg"]
+    assert res.dup_items == [("IMG_2.jpg", "20210216_191725.jpg", "20210216_191725.jpg")]
+    assert ("IMG_1.jpg", "분석 중") in seen                                  # 처리 전에도 파일명을 알린다
+    text = organizer.format_result(res)
+    for part in ("■ 성공 (1)", "IMG_1.jpg  →  20210216_191725.jpg", "■ 실패 (1)", "broken.jpg", "■ 분류불가 (1)", "■ 중복 (1)"):
+        assert part in text

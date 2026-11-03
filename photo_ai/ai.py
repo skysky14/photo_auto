@@ -18,9 +18,40 @@ from . import namer
 
 log = logging.getLogger("photoai.ai")
 PROMPT = ("이 사진의 핵심 내용을 한국어 명사 하나로 10자 이내로 말해라. "
-          "예: 산책중, 가족사진, 일몰풍경, 반려견, 커피사진. 단어만 출력하고 공백·기호·설명은 쓰지 마라.")
+          "사진에 사람이 있으면 반드시 사람을 중심으로 말하고(예: 가족사진, 아이웃음, 친구모임, 산책중, 셀카), "
+          "사람이 없을 때만 사물·동물·풍경을 말해라(예: 일몰풍경, 반려견, 커피사진). "
+          "단어만 출력하고 공백·기호·설명은 쓰지 마라.")
 
 
+# 화면 선택 목록이자 자동 다운로드 허용 목록. (모델, 설명, 내려받기 크기 GB 대략)
+MODELS = [
+    ("gemma3:4b", "균형형, 가벼움", 3.4),
+    ("gemma3n:e2b", "경량", 5.6),
+    ("gemma3n:e4b", "경량, 정확도 높음", 7.5),
+    ("qwen2.5vl:3b", "가벼움", 3.2),
+    ("qwen2.5vl:7b", "한국어 좋음", 6.0),
+    ("qwen3-vl:4b", "신형, 가벼움", 3.3),
+    ("llava:7b", "범용, 한국어 약함", 4.7),
+    ("minicpm-v:8b", "이미지 이해력 좋음", 5.5),
+    ("moondream", "매우 가벼움", 1.7),
+    ("granite3.2-vision", "문서·표에 강함", 2.4),
+]
+MODEL_NAMES = [m[0] for m in MODELS]
+# 화면 [?] 안내표용: (이미지 분석, 한국어, 속도, 특징). 직접 측정한 값이 아니라 일반적으로 알려진 평가다.
+MODEL_INFO = {
+    "gemma3:4b": ("보통~좋음", "좋음", "보통", "균형형, 기본값"),
+    "gemma3n:e2b": ("보통", "좋음", "빠른 편", "저사양용으로 설계됨"),
+    "gemma3n:e4b": ("보통~좋음", "좋음", "보통", "e2b보다 정확하지만 무거움"),
+    "qwen2.5vl:3b": ("보통~좋음", "좋음", "빠른 편", "작은 크기에 비해 인식이 좋음"),
+    "qwen2.5vl:7b": ("좋음", "좋음", "느린 편", "사물·글자 인식이 강함"),
+    "qwen3-vl:4b": ("좋음", "좋음", "보통", "신형 (Ollama 제공 여부 미확인)"),
+    "llava:7b": ("보통", "약함", "보통", "오래된 모델, 한국어 단어 품질이 낮음"),
+    "minicpm-v:8b": ("좋음", "보통", "느린 편", "크기에 비해 이미지 이해력이 높음"),
+    "moondream": ("낮음", "약함", "매우 빠름", "아주 가벼움, 설명이 단순함"),
+    "granite3.2-vision": ("보통", "보통", "빠른 편", "문서·표·차트에 강함"),
+}
+
+KEEP_ALIVE = "30m"  # 분석 사이 모델을 메모리에 유지하는 시간
 SETUP_URL = "https://ollama.com/download/OllamaSetup.exe"
 MESSAGES = {
     "no_install": "Ollama가 설치되어 있지 않습니다.",
@@ -46,6 +77,34 @@ def _models(url: str) -> list[str]:
     return [m.model for m in ollama.Client(host=url).list().models]
 
 
+def _models_on_disk() -> set[str] | None:
+    """서버가 꺼져 있어도 모델 폴더의 manifests에서 설치된 모델을 읽는다. 폴더가 없으면 None."""
+    root = Path(os.environ.get("OLLAMA_MODELS") or Path.home() / ".ollama" / "models") / "manifests"
+    if not root.is_dir():
+        return None
+    names = set()
+    for f in root.glob("*/*/*/*"):  # 레지스트리/네임스페이스/모델/태그
+        if f.is_file() and f.parts[-4:-2] == ("registry.ollama.ai", "library"):
+            names.add(f"{f.parent.name}:{f.name}")
+    return names
+
+
+def installed_models(url: str) -> set[str] | None:
+    """설치된 모델 이름 집합. 서버에 연결되면 서버 기준, 안 되고 로컬이면 디스크 기준, 그 외엔 None(알 수 없음)."""
+    try:
+        return set(_models(url))
+    except Exception:
+        return _models_on_disk() if _local(url) else None
+
+
+def is_installed(names: set[str], model: str) -> bool:
+    return model in names or f"{model}:latest" in names
+
+
+def model_size_gb(model: str) -> float:
+    return next((g for n, _, g in MODELS if n == model), 0.0)
+
+
 def diagnose(url: str, model: str) -> str | None:
     """사용 가능하면 None, 아니면 MESSAGES의 키."""
     try:
@@ -55,6 +114,23 @@ def diagnose(url: str, model: str) -> str | None:
             return "unreachable"
         return "no_server" if find_ollama() else "no_install"
     return None if any(n == model or n.split(":")[0] == model for n in names) else "no_model"
+
+
+def ensure_server(url: str, progress) -> None:
+    """이 PC의 Ollama가 꺼져 있으면 실행한다(설치·다운로드는 하지 않음). 이미 켜져 있으면 아무것도 안 한다."""
+    if not _local(url):
+        raise RuntimeError("원격 Ollama는 실행할 수 없습니다.")
+    try:
+        _models(url)
+    except Exception:
+        _serve(url, progress)
+
+
+def pull_model(url: str, model: str, progress) -> None:
+    """화면에서 고른 모델을 내려받는다. 로컬 Ollama만 허용."""
+    if not _local(url):
+        raise RuntimeError("원격 Ollama에는 모델을 자동 설치하지 않습니다.")
+    _pull(url, model, progress)
 
 
 def prepare(url: str, model: str, progress) -> None:
@@ -114,6 +190,11 @@ def _serve(url: str, progress) -> None:
 
 
 def _pull(url: str, model: str, progress) -> None:
+    if model not in MODEL_NAMES:  # 목록 밖 이름(오타·임의 레지스트리 주소)은 내려받지 않는다
+        raise RuntimeError(f"목록에 없는 모델 '{model}'은 자동 설치하지 않습니다. 직접 `ollama pull`로 설치하세요.")
+    need = model_size_gb(model) * 1.5 + 1  # shortcut: Ollama 모델 폴더를 홈 드라이브로 가정, OLLAMA_MODELS를 바꿨다면 틀림
+    if shutil.disk_usage(Path.home()).free < need * (1 << 30):
+        raise RuntimeError(f"디스크 여유 공간이 부족합니다 (약 {need:.0f}GB 필요).")
     for ev in ollama.Client(host=url, timeout=None).pull(model, stream=True):
         total, done = ev.total or 0, ev.completed or 0
         progress(f"모델 '{model}' 다운로드 중 ({ev.status})", done / total if total else None)
@@ -128,19 +209,38 @@ def _jpeg(path, max_side=1024) -> bytes:
     return buf.getvalue()
 
 
-def make_labeler(url: str, model: str):
-    """path → 설명어 또는 None(실패). 1회 재시도."""
-    client = ollama.Client(host=url, timeout=120)
+class AIUnavailable(Exception):
+    """Ollama가 연속으로 응답하지 않을 때. 작업을 멈추는 신호로 쓴다."""
+
+
+def warm_up(url: str, model: str) -> None:
+    """모델을 미리 메모리에 올린다. 한동안 안 쓰면 Ollama가 모델을 내려서 첫 분석이 매우 느려지기 때문이다."""
+    ollama.Client(host=url, timeout=None).generate(model=model, prompt="", keep_alive=KEEP_ALIVE)
+
+
+def make_labeler(url: str, model: str, give_up_after: int = 2):
+    """path → 설명어 또는 None(실패). 1회 재시도. 사진 give_up_after장이 연속으로 응답 없이 실패하면 AIUnavailable."""
+    client = ollama.Client(host=url, timeout=None)  # 시간 제한 없음: 느린 PC에서 제한 때문에 실패하지 않게
+    dead = 0  # 연속으로 서버 오류(시간 초과 등)로 실패한 사진 수
 
     def label(path) -> str | None:
+        nonlocal dead
         image = _jpeg(path)
+        errors = 0
         for _ in range(2):
             try:
-                r = client.chat(model=model, messages=[{"role": "user", "content": PROMPT, "images": [image]}])
+                r = client.chat(model=model, messages=[{"role": "user", "content": PROMPT, "images": [image]}],
+                                keep_alive=KEEP_ALIVE)
+                dead = 0
                 got = namer.clean_label(r["message"]["content"])
                 if got:
                     return got
             except Exception:
+                errors += 1
                 log.exception("Ollama 분석 실패: %s", path)
+        if errors == 2:
+            dead += 1
+            if dead >= give_up_after:
+                raise AIUnavailable(f"Ollama가 {dead}장 연속으로 응답하지 않았습니다.")
         return None
     return label

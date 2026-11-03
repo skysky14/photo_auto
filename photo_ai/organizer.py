@@ -5,10 +5,10 @@ import os
 import shutil
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import exif, namer
+from . import ai, exif, namer
 
 log = logging.getLogger("photoai.organizer")
 DONE, UNCLASSIFIED, DUPLICATE = "정리완료", "분류불가", "중복파일"
@@ -23,6 +23,11 @@ class Result:
     duplicates: int = 0
     failed: int = 0
     cancelled: bool = False
+    reason: str = ""  # 도중에 멈춘 이유(AI 무응답 등)
+    ok_items: list = field(default_factory=list)            # (원본 이름, 바뀐 이름)
+    failed_items: list = field(default_factory=list)        # 원본 이름
+    unclassified_items: list = field(default_factory=list)  # 원본 이름
+    dup_items: list = field(default_factory=list)           # (원본 이름, 중복파일 폴더의 이름, 동일한 기존 파일 이름)
     total_sec: float = 0.0
     avg_sec: float = 0.0
 
@@ -92,12 +97,19 @@ def _process_one(path, st, root, db, job, geo, labeler, res):
             db.add_stat("ai_success" if label else "ai_fail")
         folder, name, kind = root, namer.build_name(taken, place, label, path.suffix), "ok"
     dst, dup = choose_target(path, folder, name, st.check_same)
+    existing = dst.name  # dup이면 내용이 같은 기존 파일
     if dup:
         dst, _ = choose_target(path, root / DUPLICATE, name, False)
         kind = "duplicate"
     move_verified(path, dst)
     db.add_history(job, path, dst, kind)
     log.info("%s → %s [%s]", path, dst, kind)
+    if kind == "ok":
+        res.ok_items.append((path.name, dst.name))
+    elif kind == "unclassified":
+        res.unclassified_items.append(path.name)
+    else:
+        res.dup_items.append((path.name, dst.name, existing))
     return kind
 
 
@@ -116,6 +128,7 @@ def run(st, db, geo=None, labeler=None, progress=lambda i, n, path, msg: None, c
         if cancel and cancel.is_set():
             res.cancelled = True
             break
+        progress(i, len(files), path, "분석 중")
         try:
             kind = _process_one(path, st, root, db, job, geo, labeler, res)
             setattr(res, counters[kind], getattr(res, counters[kind]) + 1)
@@ -123,8 +136,13 @@ def run(st, db, geo=None, labeler=None, progress=lambda i, n, path, msg: None, c
             if kind != "ok":
                 db.add_stat("duplicates" if kind == "duplicate" else "unclassified")
             progress(i, len(files), path, kind)
+        except ai.AIUnavailable as e:  # 이 사진은 이동 전이라 원본 위치에 남아 있다
+            res.cancelled, res.reason = True, str(e)
+            log.error("AI 응답 없음으로 작업을 멈춤: %s", e)
+            break
         except Exception as e:  # 실패 파일은 원본 위치에 남는다
             res.failed += 1
+            res.failed_items.append(path.name)
             db.add_stat("failed")
             db.log(job, "error", f"{path}: {e}")
             log.exception("처리 실패: %s", path)
@@ -136,6 +154,17 @@ def run(st, db, geo=None, labeler=None, progress=lambda i, n, path, msg: None, c
              job, len(files), res.total_sec, res.avg_sec, res.ok, res.unclassified, res.duplicates, res.failed)
     db.add_stat("elapsed_sec", int(res.total_sec))
     return res
+
+
+def format_result(res: Result) -> str:
+    """결과 화면에 보여줄 성공·실패·분류불가·중복 목록."""
+    out = [f"■ 성공 ({len(res.ok_items)})"] + [f"{a}  →  {b}" for a, b in res.ok_items]
+    out += ["", f"■ 실패 ({len(res.failed_items)})"] + list(res.failed_items)
+    out += ["", f"■ 분류불가 ({len(res.unclassified_items)})"] + list(res.unclassified_items)
+    out += ["", f"■ 중복 ({len(res.dup_items)})"]
+    for a, moved, kept in res.dup_items:
+        out += [a, f"   →  {moved}  /  {kept}"]
+    return "\n".join(out)
 
 
 def undo(db, job_id: str) -> tuple[int, int]:

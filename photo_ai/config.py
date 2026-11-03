@@ -7,8 +7,6 @@ from pathlib import Path
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
 CONFIG_PATH = APP_DIR / "config.ini"
 DB_PATH = APP_DIR / "photoai.db"
-# 카카오 REST API 키(코드에 고정, config.ini에 저장하지 않는다). 로컬 API는 이 키만 쓴다. JavaScript/네이티브 앱 키는 쓰지 않는다.
-KAKAO_REST_KEY = "3e38ad2f80c7c5c1d94cd2af61d8fa5b"
 
 
 @dataclass
