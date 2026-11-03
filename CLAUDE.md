@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 프로젝트
-PhotoAI Organizer: 사진의 EXIF 촬영일, GPS, AI 분석 결과로 파일명을 자동 변경하고 폴더로 정리하는 Windows 프로그램 (Python 3.11, 개인 사용).
+PhotoAI Organizer: 사진의 EXIF 촬영일, GPS, AI 분석 결과로 파일명을 자동 변경하고 폴더로 정리하는 Windows 프로그램 (Python 3.12, 개인 사용).
 
 ```
 IMG_20210216_191725.jpg → 20210216_191725_연수구송도동_산책중.jpg
@@ -44,7 +44,7 @@ IMG_20210216_191725.jpg → 20210216_191725_연수구송도동_산책중.jpg
 - SQLite에 저장: GPS 캐시, 사용량 통계, 작업 로그, 작업 이력(원래 경로 → 새 경로, 되돌리기용).
 
 ## 기술 스택
-Python 3.11, CustomTkinter(GUI), SQLite, Ollama + Qwen2.5-VL(AI, 선택 사용), 카카오 로컬 API, Pillow·pillow-heif(EXIF/이미지), PyInstaller(포터블 `PhotoAI.exe` 빌드). OpenCV·ImageHash는 V1에서 쓰지 않는다.
+Python 3.12, CustomTkinter(GUI), SQLite, Ollama + Qwen2.5-VL(AI, 선택 사용), 카카오 로컬 API, Pillow·pillow-heif(EXIF/이미지), PyInstaller(포터블 `PhotoAI.exe` 빌드). OpenCV·ImageHash는 V1에서 쓰지 않는다.
 
 ## 명령어 (Windows, venv)
 ```
