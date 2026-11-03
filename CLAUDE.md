@@ -31,7 +31,7 @@ IMG_20210216_191725.jpg → 20210216_191725_연수구송도동_산책중.jpg
 
 - 날짜는 `YYYYMMDD_HHMMSS`. 설명어는 최대 10자, 공백·특수문자 금지. 장소는 최대 10자.
 - **장소는 건물명이 아니라 주소명**이다: 카카오 행정구역 API로 `구/시 + 동/읍/면`을 이어 붙인다 (예: `연수구송도동`).
-- GPS 좌표 → 장소명은 SQLite에 캐시한다(좌표를 소수점 4~5자리로 반올림해 키로 사용). 캐시에 있으면 API를 호출하지 않는다.
+- GPS 좌표 → 장소명은 SQLite에 캐시한다(좌표를 0.002도(약 200m) 격자로 묶고, 격자 중심 좌표(`37.500,126.600`)를 키로 사용). 캐시에 있으면 API를 호출하지 않는다.
 
 ## 중복 파일
 "동일 파일 검사" 옵션(기본 ON, `config.ini`의 `[Duplicate] CheckSameFile`).
@@ -58,6 +58,7 @@ pytest                                  # 전체 테스트
 pytest tests/test_core.py::test_pipeline   # 단일 테스트
 pyinstaller --noconfirm --clean --onefile --windowed --name PhotoAI --collect-all customtkinter --collect-all pillow_heif main.py   # dist/PhotoAI.exe
 ```
+`./build.sh`는 같은 빌드를 하고 `dist/photoai.db`를 지워 DB를 초기화한다(개발 단계). `config.ini`와 `logs/`는 남긴다.
 Ollama가 별도로 실행 중이어야 하고 모델(`ollama pull qwen2.5vl:7b`)이 설치돼 있어야 AI 분석이 동작한다. AI가 없어도 앱은 "AI 미사용" 모드로 동작해야 한다.
 시작할 때 Ollama/모델이 없으면 `ai.diagnose()`가 부족한 것을 알려 주고, 사용자가 동의하면 `ai.prepare()`가 설치(공식 `OllamaSetup.exe` 다운로드 후 `/SILENT`) → 실행 → 모델 `pull`을 진행한다. 원격 Ollama URL은 자동 설치하지 않는다.
 
@@ -72,8 +73,8 @@ Ollama가 별도로 실행 중이어야 하고 모델(`ollama pull qwen2.5vl:7b`
 - [x] Phase 0: venv, requirements.txt, Git
 - [x] Phase 1: UI(폴더 선택, 통계 영역, 진행률)
 - [x] Phase 2: SQLite(GPS 캐시, 통계 테이블)
-- [x] Phase 3: EXIF·GPS 분석, 카카오 API (실제 카카오 API 키로는 미검증)
-- [x] Phase 4: Ollama 연동, 설명어 생성 (실제 Ollama 서버로는 미검증)
+- [x] Phase 3: EXIF·GPS 분석, 카카오 API (실제 사진으로 파일명 반영 확인됨)
+- [x] Phase 4: Ollama 연동, 설명어 생성 (실제 사진으로 파일명 반영 확인됨)
 - [x] Phase 5: 파일명 생성, 중복 검사(SHA-256)
 - [x] Phase 6: 파일 이동, 분류불가·중복파일 처리
 - [x] Phase 7: 통계·작업 로그 저장

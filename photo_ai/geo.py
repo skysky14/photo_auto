@@ -8,6 +8,7 @@ import urllib.request
 from . import namer
 
 log = logging.getLogger("photoai.geo")
+GRID = 0.002  # 도 단위. 위도 약 220m, 경도 약 180m(위도 37도). shortcut: 동 경계 근처 사진은 이웃 동 이름이 붙을 수 있다, 정확도가 중요하면 줄일 것
 URL = "https://dapi.kakao.com/v2/local/geo/coord2regioncode.json"
 
 
@@ -19,7 +20,7 @@ class Geo:
         """주소명. 좌표가 같은 곳이면 캐시 사용. 조회 실패는 None(캐시하지 않음)."""
         if not self.key:
             return None
-        ck = f"{lat:.4f},{lon:.4f}"  # 약 10m 단위로 묶는다
+        ck = f"{round(lat / GRID) * GRID:.3f},{round(lon / GRID) * GRID:.3f}"  # 격자 중심 좌표(약 200m)
         hit = self.db.cache_get(ck)
         if hit is not None:
             self.db.add_stat("gps_cache_hits")

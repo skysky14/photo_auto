@@ -64,8 +64,12 @@ def test_geo_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "_fetch", lambda lat, lon: calls.append(1) or "연수구송도동")
     assert g.place(37.5, 126.6) == "연수구송도동"
     assert g.place(37.50001, 126.60001) == "연수구송도동"  # 같은 캐시 키
+    assert g.place(37.5009, 126.6009) == "연수구송도동"  # 약 100m 이내는 같은 격자
     assert len(calls) == 1
-    assert db.stats()[1]["gps_cache_hits"] == 1
+    assert db.stats()[1]["gps_cache_hits"] == 2
+    assert db.cache_get("37.500,126.600") == "연수구송도동"  # 키는 격자 중심 좌표
+    g.place(37.52, 126.6)  # 약 2km 떨어지면 새로 조회
+    assert len(calls) == 2
 
 
 def test_pipeline(tmp_path):
