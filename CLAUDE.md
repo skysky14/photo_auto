@@ -51,6 +51,7 @@ Python 3.11, CustomTkinter(GUI), SQLite, Ollama + Qwen2.5-VL(AI, 선택 사용),
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
+pip install -r requirements-dev.txt   # 개발 도구(graphify), exe 빌드에는 불필요
 python main.py   # WSL에서는 ./venv/Scripts/python.exe main.py
 pytest                                  # 전체 테스트
 pytest tests/test_core.py::test_pipeline   # 단일 테스트
@@ -76,3 +77,14 @@ Ollama가 별도로 실행 중이어야 하고 모델(`ollama pull qwen2.5vl:7b`
 - [x] Phase 7: 통계·작업 로그 저장
 - [ ] Phase 8: 100 / 1,000 / 10,000장 테스트
 - [ ] Phase 9: PyInstaller 빌드, 포터블 배포
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- When graphify-out/graph.json exists, run `graphify query "<question>"` before your first grep, search or source-file read for a codebase question, and put this rule in every subagent prompt that explores code. Read raw files only for lines the graph or an earlier read already located. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- A committed graphify-out/graph.json is rewritten whole on every build, so a large diff to it in a pull request is expected. Do not flag it as churn or suggest skipping the graph rebuild or its hooks.
