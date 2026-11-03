@@ -40,7 +40,8 @@ IMG_20210216_191725.jpg → 20210216_191725_연수구송도동_산책중.jpg
 
 ## 폴더·설정
 - 자동 생성: `정리완료/`, `정리완료/분류불가/`, `정리완료/중복파일/`
-- `config.ini`: `[AI] Enabled`, `[Ollama] Url`, `[Kakao] ApiKey`, `[Duplicate] CheckSameFile`. 카카오 API 키는 INI에 두므로 `config.ini`를 git이나 공유 대상에 넣지 않는다.
+- `config.ini`: `[AI] Enabled`, `[Ollama] Url`, `[Duplicate] CheckSameFile`. 카카오 REST API 키는 `config.py`에 코드로 고정한다(INI·UI에 없음).
+- 로그: `logs/app.log`(전체), `logs/error.log`(오류만). 작업 완료 시 총·평균 소요시간을 화면과 로그에 남긴다.
 - SQLite에 저장: GPS 캐시, 사용량 통계, 작업 로그, 작업 이력(원래 경로 → 새 경로, 되돌리기용).
 
 ## 기술 스택

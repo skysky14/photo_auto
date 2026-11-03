@@ -116,7 +116,7 @@ def test_cancel(tmp_path):
 
 def test_config_roundtrip(tmp_path):
     p = tmp_path / "c.ini"
-    s = config.Settings(source="a", kakao_key="k", ai_enabled=False, check_same=False)
+    s = config.Settings(source="a", ai_enabled=False, check_same=False)
     config.save(s, p)
     assert config.load(p) == s
 

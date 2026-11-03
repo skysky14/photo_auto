@@ -37,7 +37,6 @@ class App(ctk.CTk):
         self.v = {
             "source": ctk.StringVar(value=st.source), "result": ctk.StringVar(value=st.result),
             "ollama_url": ctk.StringVar(value=st.ollama_url), "ollama_model": ctk.StringVar(value=st.ollama_model),
-            "kakao_key": ctk.StringVar(value=st.kakao_key),
             "ai_enabled": ctk.BooleanVar(value=st.ai_enabled), "check_same": ctk.BooleanVar(value=st.check_same),
             "recursive": ctk.BooleanVar(value=st.recursive),
         }
@@ -52,9 +51,9 @@ class App(ctk.CTk):
         f.columnconfigure(1, weight=1)
         for r, (label, key, browse) in enumerate([("원본 사진 폴더", "source", True), ("결과 저장 폴더", "result", True),
                                                   ("Ollama URL", "ollama_url", False), ("Ollama 모델", "ollama_model", False),
-                                                  ("카카오 API 키", "kakao_key", False)]):
+                                                  ]):
             ctk.CTkLabel(f, text=label).grid(row=r, column=0, padx=8, pady=4, sticky="w")
-            ctk.CTkEntry(f, textvariable=self.v[key], show="*" if key == "kakao_key" else "").grid(row=r, column=1, padx=4, sticky="ew")
+            ctk.CTkEntry(f, textvariable=self.v[key]).grid(row=r, column=1, padx=4, sticky="ew")
             if browse:
                 ctk.CTkButton(f, text="찾기", width=60, command=lambda k=key: self.browse(k)).grid(row=r, column=2, padx=8)
         opts = ctk.CTkFrame(self)
@@ -126,8 +125,6 @@ class App(ctk.CTk):
                 if ans is None:
                     return
                 prepare, st.ai_enabled = ans, ans
-        if not st.kakao_key:
-            self.status.configure(text="카카오 API 키가 없어 장소명은 생략합니다.")
         config.save(self.settings())
         self.cancel.clear()
         self.running = True
@@ -139,7 +136,7 @@ class App(ctk.CTk):
         try:
             if prepare:
                 ai.prepare(st.ollama_url, st.ollama_model, lambda t, f: self.q.put(("prep", t, f)))
-            g = geo.Geo(st.kakao_key, self.db) if st.kakao_key else None
+            g = geo.Geo(config.KAKAO_REST_KEY, self.db)
             lab = ai.make_labeler(st.ollama_url, st.ollama_model) if st.ai_enabled else None
             res = organizer.run(st, self.db, g, lab, lambda *a: self.q.put(("p", *a)), self.cancel)
             self.q.put(("done", res))

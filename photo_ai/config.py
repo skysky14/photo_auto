@@ -7,19 +7,17 @@ from pathlib import Path
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
 CONFIG_PATH = APP_DIR / "config.ini"
 DB_PATH = APP_DIR / "photoai.db"
-# 카카오 REST API 키(내장). 로컬 API는 이 키만 쓴다. JavaScript/네이티브 앱 키는 쓰지 않는다.
+# 카카오 REST API 키(코드에 고정, config.ini에 저장하지 않는다). 로컬 API는 이 키만 쓴다. JavaScript/네이티브 앱 키는 쓰지 않는다.
 KAKAO_REST_KEY = "3e38ad2f80c7c5c1d94cd2af61d8fa5b"
 
 
 @dataclass
 class Settings:
-    # kakao_key는 비어 있으면 load()가 내장 키로 채운다
     source: str = ""
     result: str = ""
     ai_enabled: bool = True
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5vl:7b"
-    kakao_key: str = ""
     check_same: bool = True
     recursive: bool = True
 
@@ -28,7 +26,6 @@ class Settings:
 _MAP = {
     "source": ("Folders", "Source"), "result": ("Folders", "Result"),
     "ai_enabled": ("AI", "Enabled"), "ollama_url": ("Ollama", "Url"), "ollama_model": ("Ollama", "Model"),
-    "kakao_key": ("Kakao", "ApiKey"),
     "check_same": ("Duplicate", "CheckSameFile"), "recursive": ("Scan", "Recursive"),
 }
 
@@ -43,7 +40,6 @@ def load(path: Path = CONFIG_PATH) -> Settings:
             continue
         v = cp.get(sec, key)
         setattr(s, f.name, cp.getboolean(sec, key) if f.type is bool else v)
-    s.kakao_key = s.kakao_key or KAKAO_REST_KEY
     return s
 
 
