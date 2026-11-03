@@ -28,7 +28,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("PhotoAI Organizer")
-        self.geometry("720x720")
+        self.geometry("820x720")
         config.migrate_old_db()
         self.db = dbm.DB(config.DB_PATH)
         self.q: queue.Queue = queue.Queue()
@@ -73,6 +73,10 @@ class App(ctk.CTk):
         ctk.CTkCheckBox(opts, text="AI 사용", variable=self.v["ai_enabled"]).pack(side="left", padx=10, pady=8)
         ctk.CTkCheckBox(opts, text="동일 파일 검사", variable=self.v["check_same"]).pack(side="left", padx=10)
         ctk.CTkCheckBox(opts, text="하위 폴더 포함", variable=self.v["recursive"]).pack(side="left", padx=10)
+        self.refetch = ctk.BooleanVar(value=False)  # 저장하지 않는 일회성 선택
+        ctk.CTkCheckBox(opts, text="행정구역 데이터 다시 받기", variable=self.refetch).pack(side="left", padx=10)
+        self.btn_result = ctk.CTkButton(opts, text="결과", width=70, state="disabled", command=self.show_result)
+        self.btn_result.pack(side="left", padx=10)
 
         box = ctk.CTkFrame(self)
         box.pack(fill="x", padx=12, pady=6)
@@ -102,8 +106,6 @@ class App(ctk.CTk):
         self.btn_start.pack(side="left", padx=6)
         self.btn_cancel = ctk.CTkButton(btns, text="취소", state="disabled", command=self.on_cancel)
         self.btn_cancel.pack(side="left", padx=6)
-        self.btn_result = ctk.CTkButton(btns, text="결과", state="disabled", command=self.show_result)
-        self.btn_result.pack(side="left", padx=6)
         ctk.CTkButton(btns, text="마지막 작업 되돌리기", fg_color="gray40", command=self.undo).pack(side="left", padx=6)
         ctk.CTkButton(btns, text="종료", fg_color="#a33", hover_color="#822", width=70, command=self.on_quit).pack(side="left", padx=6)
 
@@ -270,13 +272,8 @@ class App(ctk.CTk):
                 if ans is None:
                     return
                 prepare, st.ai_enabled = ans, ans
-        fetch = False
-        if self.db.region_count() == 0:
-            ans = messagebox.askyesnocancel(
-                "장소 데이터", "장소명을 붙이려면 행정구역 경계 데이터(약 35MB)를 한 번 내려받아야 합니다.\n\n지금 받을까요?\n(아니요: 장소명 없이 계속, 취소: 중단)")
-            if ans is None:
-                return
-            fetch = ans
+        fetch = self.db.region_count() == 0 or self.refetch.get()  # 없으면 무조건, 있으면 체크했을 때만
+        self.refetch.set(False)
         config.save(self.settings())
         self.reset_results()
         self.cancel.clear()
@@ -292,8 +289,11 @@ class App(ctk.CTk):
             if fetch:
                 try:
                     geo.download_regions(self.db, lambda t, f: self.q.put(("prep", t, f)))
-                except Exception:
-                    log.exception("행정구역 데이터 준비 실패 (장소명 없이 진행)")
+                except Exception as e:
+                    log.exception("행정구역 데이터 받기 실패")
+                    if self.db.region_count() == 0:  # 처음 받는 데이터는 필수라 여기서 멈춘다
+                        raise RuntimeError(f"행정구역 데이터를 받지 못해 분석을 시작할 수 없습니다.\n인터넷 연결을 확인하고 다시 시도하세요.\n({e})") from e
+                    self.q.put(("prep", "행정구역 데이터를 새로 받지 못해 기존 데이터로 진행합니다.", None))
             if st.ai_enabled:
                 self.q.put(("prep", "AI 모델을 불러오는 중... (오래 쉬었다면 몇 분 걸릴 수 있습니다)", None))
                 try:
