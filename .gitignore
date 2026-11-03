@@ -15,3 +15,6 @@ logs/
 *.db-shm
 *.db-wal
 *.db-journal
+graphify-out/.graphify_build_state.json
+graphify-out/.graphify_labels*
+graphify-out/.graphify_root
