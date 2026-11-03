@@ -66,7 +66,7 @@ def test_geo_place(tmp_path):
     db = dbm.DB(tmp_path / "t.db")
     db.replace_regions(geo.parse_geojson(geojson()))
     g = geo.Geo(db)  # 좌표는 (lon=x, lat=y)
-    assert g.place(lat=2, lon=2) == "연수구송도1.4동"    # 안쪽, 가운뎃점은 카카오 표기처럼 .으로
+    assert g.place(lat=2, lon=2) == "연수구송도1.4동"    # 안쪽, 가운뎃점은 .으로
     assert g.place(lat=5, lon=5) == "연수구송도2동"      # 1동의 구멍 안은 2동
     assert g.place(lat=2, lon=11) is None                # 경계 밖
     assert g.place(lat=11, lon=2) is None
@@ -276,3 +276,18 @@ def test_result_lists(tmp_path):
     text = organizer.format_result(res)
     for part in ("■ 성공 (1)", "IMG_1.jpg  →  20210216_191725.jpg", "■ 실패 (1)", "broken.jpg", "■ 분류불가 (1)", "■ 중복 (1)"):
         assert part in text
+
+
+def test_db_creates_folder_and_migrates_old_file(tmp_path):
+    new = tmp_path / "data" / "photoai.db"
+    dbm.DB(new)                                   # data 폴더를 스스로 만든다
+    assert new.exists()
+    old_dir, new2 = tmp_path / "app", tmp_path / "app" / "data" / "photoai.db"
+    old_dir.mkdir()
+    (old_dir / "photoai.db").write_text("x")
+    (old_dir / "photoai.db-wal").write_text("w")
+    config.migrate_old_db(old_dir, new2)
+    assert new2.read_text() == "x" and (new2.parent / "photoai.db-wal").exists() and not (old_dir / "photoai.db").exists()
+    (old_dir / "photoai.db").write_text("again")   # 새 위치에 이미 있으면 덮어쓰지 않는다
+    config.migrate_old_db(old_dir, new2)
+    assert new2.read_text() == "x" and (old_dir / "photoai.db").exists()

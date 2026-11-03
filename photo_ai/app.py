@@ -29,6 +29,7 @@ class App(ctk.CTk):
         super().__init__()
         self.title("PhotoAI Organizer")
         self.geometry("720x720")
+        config.migrate_old_db()
         self.db = dbm.DB(config.DB_PATH)
         self.q: queue.Queue = queue.Queue()
         self.cancel = threading.Event()

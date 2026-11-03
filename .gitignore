@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 config.ini
 *.db
+data/
 dist/
 build/
 *.spec

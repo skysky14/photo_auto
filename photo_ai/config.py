@@ -6,7 +6,20 @@ from pathlib import Path
 
 APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
 CONFIG_PATH = APP_DIR / "config.ini"
-DB_PATH = APP_DIR / "photoai.db"
+DATA_DIR = APP_DIR / "data"
+DB_PATH = DATA_DIR / "photoai.db"
+
+
+def migrate_old_db(old_dir: Path = APP_DIR, new_path: Path = DB_PATH) -> None:
+    """예전 위치(실행 폴더 바로 아래)의 DB가 있고 새 위치에 없으면 data 폴더로 옮긴다. -wal/-shm도 함께."""
+    old = old_dir / new_path.name
+    if not old.exists() or new_path.exists():
+        return
+    new_path.parent.mkdir(parents=True, exist_ok=True)
+    for suffix in ("", "-wal", "-shm"):
+        f = old.with_name(old.name + suffix)
+        if f.exists():
+            f.replace(new_path.with_name(new_path.name + suffix))
 
 
 @dataclass

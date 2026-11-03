@@ -31,7 +31,7 @@ IMG_20210216_191725.jpg → 20210216_191725_연수구송도동_산책중.jpg
 
 - 날짜는 `YYYYMMDD_HHMMSS`. 설명어는 최대 10자, 공백·특수문자 금지. 장소는 최대 10자.
 - **장소는 건물명이 아니라 주소명**이다: 공공 행정동 경계 데이터로 `구/시 + 동`을 이어 붙인다 (예: `연수구송도1동`, 가운뎃점은 `.`).
-- GPS 좌표 → 장소명은 SQLite `regions`(행정동 경계)에서 점-다각형 판정으로 구한다. 데이터는 첫 실행 때 동의 후 내려받고(`geo.download_regions`, SHA-256 고정), 카카오 API는 쓰지 않는다.
+- GPS 좌표 → 장소명은 SQLite `regions`(행정동 경계)에서 점-다각형 판정으로 구한다. 데이터는 첫 실행 때 동의 후 내려받고(`geo.download_regions`, SHA-256 고정). 외부 API는 쓰지 않는다.
 
 ## 중복 파일
 "동일 파일 검사" 옵션(기본 ON, `config.ini`의 `[Duplicate] CheckSameFile`).
@@ -41,6 +41,7 @@ IMG_20210216_191725.jpg → 20210216_191725_연수구송도동_산책중.jpg
 ## 폴더·설정
 - 자동 생성: `정리완료/`, `정리완료/분류불가/`, `정리완료/중복파일/`
 - `config.ini`: `[AI] Enabled`, `[Ollama] Url`, `[Duplicate] CheckSameFile`.
+- DB 파일은 실행 폴더 아래 `data/photoai.db`에 둔다(예전 위치의 DB는 첫 실행 때 자동으로 옮김).
 - 로그: `logs/app.log`(전체), `logs/error.log`(오류만). 작업 완료 시 총·평균 소요시간을 화면과 로그에 남긴다.
 - SQLite에 저장: 행정동 경계, 사용량 통계, 작업 로그, 작업 이력(원래 경로 → 새 경로, 되돌리기용).
 
@@ -58,7 +59,7 @@ pytest                                  # 전체 테스트
 pytest tests/test_core.py::test_pipeline   # 단일 테스트
 pyinstaller --noconfirm --clean --onefile --windowed --name PhotoAI --collect-all customtkinter --collect-all pillow_heif main.py   # dist/PhotoAI.exe
 ```
-`./build.sh`는 같은 빌드를 하고 `dist/photoai.db`를 지워 DB를 초기화한다(개발 단계). `config.ini`와 `logs/`는 남긴다.
+`./build.sh`는 같은 빌드를 하고 `dist/data/photoai.db`를 지워 DB를 초기화한다(개발 단계). `config.ini`와 `logs/`는 남긴다.
 Ollama가 별도로 실행 중이어야 하고 모델(`ollama pull gemma3:4b`)이 설치돼 있어야 AI 분석이 동작한다. AI가 없어도 앱은 "AI 미사용" 모드로 동작해야 한다.
 분석 중 취소·종료는 현재 사진까지 끝낸 뒤 멈춘다. AI 응답 시간 제한은 없고, 연속 2장 연결 오류면 작업을 멈춘다. Ollama가 꺼져 있으면 자동 실행한다.
 AI 모델은 화면 선택 상자(`ai.MODELS` 10개, 설치 여부 표시)에서 고르고, 미설치 모델은 확인 후 내려받는다. 목록 밖 모델과 원격 Ollama에는 자동 설치하지 않는다.
@@ -75,7 +76,7 @@ AI 모델은 화면 선택 상자(`ai.MODELS` 10개, 설치 여부 표시)에서
 - [x] Phase 0: venv, requirements.txt, Git
 - [x] Phase 1: UI(폴더 선택, 통계 영역, 진행률)
 - [x] Phase 2: SQLite(GPS 캐시, 통계 테이블)
-- [x] Phase 3: EXIF·GPS 분석, 행정동 경계로 주소명 (카카오 API는 제거함)
+- [x] Phase 3: EXIF·GPS 분석, 행정동 경계로 주소명
 - [x] Phase 4: Ollama 연동, 설명어 생성 (실제 사진으로 파일명 반영 확인됨)
 - [x] Phase 5: 파일명 생성, 중복 검사(SHA-256)
 - [x] Phase 6: 파일 이동, 분류불가·중복파일 처리

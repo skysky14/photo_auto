@@ -3,6 +3,7 @@ import sqlite3
 import threading
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 STAT_NAMES = (
     "processed", "geo_hits", "geo_miss", "ollama_calls", "ai_success", "ai_fail",
@@ -10,9 +11,7 @@ STAT_NAMES = (
 )
 
 _SCHEMA = """
-CREATE TABLE IF NOT EXISTS gps_cache(
-  id TEXT PRIMARY KEY, key TEXT UNIQUE NOT NULL, place TEXT NOT NULL,
-  updated_at TEXT NOT NULL, synced INTEGER NOT NULL DEFAULT 0);
+DROP TABLE IF EXISTS gps_cache;  -- 예전 GPS 캐시(더 이상 쓰지 않음)
 CREATE TABLE IF NOT EXISTS regions(
   id TEXT PRIMARY KEY, adm_cd TEXT NOT NULL, sgg TEXT NOT NULL, dong TEXT NOT NULL,
   minx REAL NOT NULL, miny REAL NOT NULL, maxx REAL NOT NULL, maxy REAL NOT NULL, geom TEXT NOT NULL,
@@ -40,6 +39,7 @@ def _id() -> str:
 
 class DB:
     def __init__(self, path):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.con = sqlite3.connect(path, check_same_thread=False)
         self.lock = threading.Lock()
         with self.lock:
@@ -76,15 +76,6 @@ class DB:
             self.con.executemany(
                 "INSERT INTO regions(id,adm_cd,sgg,dong,minx,miny,maxx,maxy,geom,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                 [(_id(), *r, now) for r in rows])
-
-    # (사용 중단) 카카오 시절 GPS 캐시
-    def cache_get(self, key: str) -> str | None:
-        rows = self._query("SELECT place FROM gps_cache WHERE key=?", (key,))
-        return rows[0][0] if rows else None
-
-    def cache_put(self, key: str, place: str) -> None:
-        self._exec("INSERT OR REPLACE INTO gps_cache(id,key,place,updated_at) VALUES(?,?,?,?)",
-                   (_id(), key, place, _now()))
 
     # 통계
     def add_stat(self, name: str, n: int = 1) -> None:
