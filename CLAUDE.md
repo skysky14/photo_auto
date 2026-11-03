@@ -51,24 +51,28 @@ Python 3.11, CustomTkinter(GUI), SQLite, Ollama + Qwen2.5-VL(AI, 선택 사용),
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
-python main.py
+python main.py   # WSL에서는 ./venv/Scripts/python.exe main.py
 pytest                                  # 전체 테스트
-pytest tests/test_namer.py::test_unique_path   # 단일 테스트
+pytest tests/test_core.py::test_pipeline   # 단일 테스트
 pyinstaller ...                         # 빌드 (설정은 Phase 9에서 확정)
 ```
 Ollama가 별도로 실행 중이어야 하고 모델(`ollama pull qwen2.5vl:7b`)이 설치돼 있어야 AI 분석이 동작한다. AI가 없어도 앱은 "AI 미사용" 모드로 동작해야 한다.
 
-## 현재 상태
-`photo_ai/`의 코드는 초기 프로토타입이다. 기획서와 다른 점: Tkinter 사용, 파일명 `YYYY-MM-DD_내용`, GPS·중복 처리·정리 폴더·SQLite 없음. 아래 단계에 따라 기획서 기준으로 다시 만든다. `photo_ai/namer.py`의 순수 함수 구조(GUI·AI 없이 테스트 가능)는 유지한다.
+## 구조
+- `photo_ai/namer.py`(파일명·설명어·장소 규칙, 순수 함수) / `exif.py`(촬영일·GPS) / `geo.py`(카카오 주소명 + SQLite 캐시) / `ai.py`(Ollama 설명어) / `db.py`(SQLite) / `config.py`(config.ini)
+- `organizer.py`: 파이프라인 본체. `run()`이 스캔 → 처리 → 검증 이동을 하고, geo/labeler는 주입식이라 테스트에서 가짜로 대체한다. `undo()`가 작업 이력으로 되돌린다.
+- `app.py`: CustomTkinter GUI. 처리는 백그라운드 스레드, 진행 상황은 `queue`로 받아 메인 스레드가 갱신한다.
+- 촬영일이 없으면 AI·장소 조회 없이 원본 이름 그대로 `분류불가`로 이동한다.
+- 개발 환경: WSL에서는 Windows Python으로 실행한다 (`./venv/Scripts/python.exe`, WSL Python에는 tkinter/pip 없음).
 
 ## 개발 단계 (진행 시 체크)
-- [ ] Phase 0: venv, requirements.txt, Git
-- [ ] Phase 1: UI(폴더 선택, 통계 영역, 진행률)
-- [ ] Phase 2: SQLite(GPS 캐시, 통계 테이블)
-- [ ] Phase 3: EXIF·GPS 분석, 카카오 API
-- [ ] Phase 4: Ollama 연동, 설명어 생성
-- [ ] Phase 5: 파일명 생성, 중복 검사(SHA-256)
-- [ ] Phase 6: 파일 이동, 분류불가·중복파일 처리
-- [ ] Phase 7: 통계·작업 로그 저장
+- [x] Phase 0: venv, requirements.txt, Git
+- [x] Phase 1: UI(폴더 선택, 통계 영역, 진행률)
+- [x] Phase 2: SQLite(GPS 캐시, 통계 테이블)
+- [x] Phase 3: EXIF·GPS 분석, 카카오 API (실제 카카오 API 키로는 미검증)
+- [x] Phase 4: Ollama 연동, 설명어 생성 (실제 Ollama 서버로는 미검증)
+- [x] Phase 5: 파일명 생성, 중복 검사(SHA-256)
+- [x] Phase 6: 파일 이동, 분류불가·중복파일 처리
+- [x] Phase 7: 통계·작업 로그 저장
 - [ ] Phase 8: 100 / 1,000 / 10,000장 테스트
 - [ ] Phase 9: PyInstaller 빌드, 포터블 배포
