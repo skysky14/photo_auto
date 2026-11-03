@@ -55,7 +55,7 @@ pip install -r requirements-dev.txt   # 개발 도구(graphify), exe 빌드에�
 python main.py   # WSL에서는 ./venv/Scripts/python.exe main.py
 pytest                                  # 전체 테스트
 pytest tests/test_core.py::test_pipeline   # 단일 테스트
-pyinstaller ...                         # 빌드 (설정은 Phase 9에서 확정)
+pyinstaller --noconfirm --clean --onefile --windowed --name PhotoAI --collect-all customtkinter --collect-all pillow_heif main.py   # dist/PhotoAI.exe
 ```
 Ollama가 별도로 실행 중이어야 하고 모델(`ollama pull qwen2.5vl:7b`)이 설치돼 있어야 AI 분석이 동작한다. AI가 없어도 앱은 "AI 미사용" 모드로 동작해야 한다.
 
@@ -76,7 +76,7 @@ Ollama가 별도로 실행 중이어야 하고 모델(`ollama pull qwen2.5vl:7b`
 - [x] Phase 6: 파일 이동, 분류불가·중복파일 처리
 - [x] Phase 7: 통계·작업 로그 저장
 - [ ] Phase 8: 100 / 1,000 / 10,000장 테스트
-- [ ] Phase 9: PyInstaller 빌드, 포터블 배포
+- [x] Phase 9: PyInstaller 빌드, 포터블 배포 (`dist/PhotoAI.exe`, 실행 확인만 함)
 
 ## graphify
 
