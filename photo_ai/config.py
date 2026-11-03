@@ -17,7 +17,7 @@ class Settings:
     result: str = ""
     ai_enabled: bool = True
     ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5vl:7b"
+    ollama_model: str = "gemma3:4b"
     check_same: bool = True
     recursive: bool = True
 

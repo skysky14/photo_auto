@@ -45,7 +45,7 @@ IMG_20210216_191725.jpg → 20210216_191725_연수구송도동_산책중.jpg
 - SQLite에 저장: GPS 캐시, 사용량 통계, 작업 로그, 작업 이력(원래 경로 → 새 경로, 되돌리기용).
 
 ## 기술 스택
-Python 3.12, CustomTkinter(GUI), SQLite, Ollama + Qwen2.5-VL(AI, 선택 사용), 카카오 로컬 API, Pillow·pillow-heif(EXIF/이미지), PyInstaller(포터블 `PhotoAI.exe` 빌드). OpenCV·ImageHash는 V1에서 쓰지 않는다.
+Python 3.12, CustomTkinter(GUI), SQLite, Ollama + Gemma 3 4B(AI, 선택 사용, 모델은 설정에서 변경 가능), 카카오 로컬 API, Pillow·pillow-heif(EXIF/이미지), PyInstaller(포터블 `PhotoAI.exe` 빌드). OpenCV·ImageHash는 V1에서 쓰지 않는다.
 
 ## 명령어 (Windows, venv)
 ```
@@ -59,7 +59,7 @@ pytest tests/test_core.py::test_pipeline   # 단일 테스트
 pyinstaller --noconfirm --clean --onefile --windowed --name PhotoAI --collect-all customtkinter --collect-all pillow_heif main.py   # dist/PhotoAI.exe
 ```
 `./build.sh`는 같은 빌드를 하고 `dist/photoai.db`를 지워 DB를 초기화한다(개발 단계). `config.ini`와 `logs/`는 남긴다.
-Ollama가 별도로 실행 중이어야 하고 모델(`ollama pull qwen2.5vl:7b`)이 설치돼 있어야 AI 분석이 동작한다. AI가 없어도 앱은 "AI 미사용" 모드로 동작해야 한다.
+Ollama가 별도로 실행 중이어야 하고 모델(`ollama pull gemma3:4b`)이 설치돼 있어야 AI 분석이 동작한다. AI가 없어도 앱은 "AI 미사용" 모드로 동작해야 한다.
 시작할 때 Ollama/모델이 없으면 `ai.diagnose()`가 부족한 것을 알려 주고, 사용자가 동의하면 `ai.prepare()`가 설치(공식 `OllamaSetup.exe` 다운로드 후 `/SILENT`) → 실행 → 모델 `pull`을 진행한다. 원격 Ollama URL은 자동 설치하지 않는다.
 
 ## 구조
