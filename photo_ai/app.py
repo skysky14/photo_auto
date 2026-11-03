@@ -50,10 +50,10 @@ class App(ctk.CTk):
         f.pack(fill="x", padx=12, pady=(12, 6))
         f.columnconfigure(1, weight=1)
         for r, (label, key, browse) in enumerate([("원본 사진 폴더", "source", True), ("결과 저장 폴더", "result", True),
-                                                  ("Ollama URL", "ollama_url", False), ("Ollama 모델", "ollama_model", False),
+                                                  ("AI 주소", "ollama_url", False), ("AI 모델", "ollama_model", False),
                                                   ]):
             ctk.CTkLabel(f, text=label).grid(row=r, column=0, padx=8, pady=4, sticky="w")
-            ctk.CTkEntry(f, textvariable=self.v[key]).grid(row=r, column=1, padx=4, sticky="ew")
+            ctk.CTkEntry(f, textvariable=self.v[key], state="disabled" if key == "ollama_url" else "normal").grid(row=r, column=1, padx=4, sticky="ew")
             if browse:
                 ctk.CTkButton(f, text="찾기", width=60, command=lambda k=key: self.browse(k)).grid(row=r, column=2, padx=8)
         opts = ctk.CTkFrame(self)
