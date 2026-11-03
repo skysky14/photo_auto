@@ -119,3 +119,34 @@ def test_config_roundtrip(tmp_path):
     s = config.Settings(source="a", kakao_key="k", ai_enabled=False, check_same=False)
     config.save(s, p)
     assert config.load(p) == s
+
+
+def test_ai_diagnose(monkeypatch):
+    from photo_ai import ai
+
+    def down(url):
+        raise ConnectionError
+
+    monkeypatch.setattr(ai, "_models", down)
+    monkeypatch.setattr(ai, "find_ollama", lambda: None)
+    assert ai.diagnose("http://localhost:11434", "m") == "no_install"
+    monkeypatch.setattr(ai, "find_ollama", lambda: Path("x"))
+    assert ai.diagnose("http://localhost:11434", "m") == "no_server"
+    assert ai.diagnose("http://10.0.0.5:11434", "m") == "unreachable"
+    monkeypatch.setattr(ai, "_models", lambda url: ["llava:7b"])
+    assert ai.diagnose("http://localhost:11434", "qwen2.5vl:7b") == "no_model"
+    monkeypatch.setattr(ai, "_models", lambda url: ["qwen2.5vl:7b"])
+    assert ai.diagnose("http://localhost:11434", "qwen2.5vl:7b") is None
+
+
+def test_ai_prepare_runs_missing_steps(monkeypatch):
+    from photo_ai import ai
+
+    states = iter(["no_install", "no_server", "no_model", None])
+    calls = []
+    monkeypatch.setattr(ai, "diagnose", lambda u, m: next(states))
+    monkeypatch.setattr(ai, "_install", lambda p: calls.append("install"))
+    monkeypatch.setattr(ai, "_serve", lambda u, p: calls.append("serve"))
+    monkeypatch.setattr(ai, "_pull", lambda u, m, p: calls.append("pull"))
+    ai.prepare("http://localhost:11434", "m", lambda *a: None)
+    assert calls == ["install", "serve", "pull"]

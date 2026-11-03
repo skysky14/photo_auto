@@ -100,10 +100,21 @@ class App(ctk.CTk):
         if not Path(st.source).is_dir() or not st.result:
             messagebox.showwarning("확인", "원본 폴더와 결과 저장 폴더를 지정하세요.")
             return
-        if st.ai_enabled and (why := ai.check(st.ollama_url, st.ollama_model)):
-            if not messagebox.askyesno("AI 사용 불가", f"{why}\n\nAI 없이 계속할까요?"):
-                return
-            st.ai_enabled = False
+        prepare = False
+        if st.ai_enabled and (state := ai.diagnose(st.ollama_url, st.ollama_model)):
+            why = ai.MESSAGES[state].format(url=st.ollama_url, model=st.ollama_model)
+            if state == "unreachable":
+                if not messagebox.askyesno("AI 사용 불가", f"{why}\n\nAI 없이 계속할까요?"):
+                    return
+                st.ai_enabled = False
+            else:
+                need = {"no_install": "Ollama 설치 파일(약 1GB)과 모델(수 GB)을 내려받아 설치합니다.",
+                        "no_server": "Ollama를 실행합니다. 모델이 없으면 함께 내려받습니다.",
+                        "no_model": "모델(수 GB)을 내려받습니다."}[state]
+                ans = messagebox.askyesnocancel("AI 준비", f"{why}\n\n{need}\n\n지금 준비할까요?\n(아니요: AI 없이 계속, 취소: 중단)")
+                if ans is None:
+                    return
+                prepare, st.ai_enabled = ans, ans
         if not st.kakao_key:
             self.status.configure(text="카카오 API 키가 없어 장소명은 생략합니다.")
         config.save(self.settings())
@@ -111,10 +122,12 @@ class App(ctk.CTk):
         self.running = True
         self.btn_start.configure(state="disabled")
         self.btn_cancel.configure(state="normal")
-        threading.Thread(target=self._worker, args=(st,), daemon=True).start()
+        threading.Thread(target=self._worker, args=(st, prepare), daemon=True).start()
 
-    def _worker(self, st):
+    def _worker(self, st, prepare=False):
         try:
+            if prepare:
+                ai.prepare(st.ollama_url, st.ollama_model, lambda t, f: self.q.put(("prep", t, f)))
             g = geo.Geo(st.kakao_key, self.db) if st.kakao_key else None
             lab = ai.make_labeler(st.ollama_url, st.ollama_model) if st.ai_enabled else None
             res = organizer.run(st, self.db, g, lab, lambda *a: self.q.put(("p", *a)), self.cancel)
@@ -131,6 +144,10 @@ class App(ctk.CTk):
                     self.found.configure(text=str(n))
                     self.bar.set(i / n if n else 1)
                     self.status.configure(text=f"{i}/{n}  {Path(path).name}  [{msg}]")
+                elif m[0] == "prep":
+                    self.status.configure(text=m[1])
+                    if m[2] is not None:
+                        self.bar.set(m[2])
                 elif m[0] == "done":
                     r = m[1]
                     self.finish(f"{'취소됨' if r.cancelled else '완료'}: 정상 {r.ok}, 분류불가 {r.unclassified}, 중복 {r.duplicates}, 실패 {r.failed}")

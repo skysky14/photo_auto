@@ -58,6 +58,7 @@ pytest tests/test_core.py::test_pipeline   # 단일 테스트
 pyinstaller --noconfirm --clean --onefile --windowed --name PhotoAI --collect-all customtkinter --collect-all pillow_heif main.py   # dist/PhotoAI.exe
 ```
 Ollama가 별도로 실행 중이어야 하고 모델(`ollama pull qwen2.5vl:7b`)이 설치돼 있어야 AI 분석이 동작한다. AI가 없어도 앱은 "AI 미사용" 모드로 동작해야 한다.
+시작할 때 Ollama/모델이 없으면 `ai.diagnose()`가 부족한 것을 알려 주고, 사용자가 동의하면 `ai.prepare()`가 설치(공식 `OllamaSetup.exe` 다운로드 후 `/SILENT`) → 실행 → 모델 `pull`을 진행한다. 원격 Ollama URL은 자동 설치하지 않는다.
 
 ## 구조
 - `photo_ai/namer.py`(파일명·설명어·장소 규칙, 순수 함수) / `exif.py`(촬영일·GPS) / `geo.py`(카카오 주소명 + SQLite 캐시) / `ai.py`(Ollama 설명어) / `db.py`(SQLite) / `config.py`(config.ini)
