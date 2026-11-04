@@ -25,7 +25,7 @@ def settings(tmp_path, **kw):
 def test_clean_label():
     assert namer.clean_label("산책중\n설명") == "산책중"
     assert namer.clean_label('"가족 사진!"') == "가족사진"
-    assert namer.clean_label("열한글자를넘는설명어입니다만") is None
+    assert namer.clean_label("열한글자를넘는설명어입니다만") == "열한글자를넘는설명어" and len(namer.clean_label("가" * 50)) == 10
     assert namer.clean_label("") is None
 
 
