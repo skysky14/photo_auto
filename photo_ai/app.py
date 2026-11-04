@@ -211,8 +211,9 @@ class App(ctk.CTk):
         win.title("분석 결과")
         win.geometry("760x560")
         win.attributes("-topmost", True)
+        ctk.CTkButton(win, text="닫기", width=100, command=win.destroy).pack(side="bottom", pady=(0, 12))
         box = ctk.CTkTextbox(win, wrap="none")
-        box.pack(fill="both", expand=True, padx=12, pady=12)
+        box.pack(fill="both", expand=True, padx=12, pady=(12, 8))
         box.insert("1.0", organizer.format_result(r))
         box.configure(state="disabled")  # 보기 전용(복사는 가능)
 

@@ -109,12 +109,12 @@ def test_pipeline(tmp_path):
     res = organizer.run(st, db, labeler=lambda p: "산책중")
     root = Path(st.result)
     assert sorted(x.name for x in root.glob("*.jpg")) == ["20210216_191725_산책중.jpg", "20210216_191725_산책중_001.jpg"]
-    assert [x.name for x in (root / "중복파일").glob("*")] == ["20210216_191725_산책중.jpg"]
+    assert [x.name for x in (root / "중복파일").glob("*")] == ["IMG_2.jpg"]  # 중복은 원본 이름 그대로
     assert (root / "분류불가" / "no_date.jpg").exists()
     assert (src / "broken.jpg").exists()  # 실패 파일은 원본 유지
     assert (res.ok, res.unclassified, res.duplicates, res.failed) == (2, 1, 1, 1)
     today, total = db.stats()
-    assert total["processed"] == 4 and total["ai_success"] == 3 and total["failed"] == 1
+    assert total["processed"] == 4 and total["ai_success"] == 2 and total["failed"] == 1  # 중복은 AI를 건너뜀
 
     # 되돌리기
     done, skipped = organizer.undo(db, res.job_id)
@@ -271,7 +271,7 @@ def test_result_lists(tmp_path):
     res = organizer.run(st, dbm.DB(tmp_path / "t.db"), progress=lambda i, n, p, msg: seen.append((p.name, msg)))
     assert res.ok_items == [("IMG_1.jpg", "20210216_191725.jpg")]
     assert res.unclassified_items == ["no_date.jpg"] and res.failed_items == ["broken.jpg"]
-    assert res.dup_items == [("IMG_2.jpg", "20210216_191725.jpg", "20210216_191725.jpg")]
+    assert res.dup_items == [("IMG_2.jpg", "IMG_2.jpg", "20210216_191725.jpg")]
     assert ("IMG_1.jpg", "분석 중") in seen                                  # 처리 전에도 파일명을 알린다
     text = organizer.format_result(res)
     for part in ("■ 성공 (1)", "IMG_1.jpg  →  20210216_191725.jpg", "■ 실패 (1)", "broken.jpg", "■ 분류불가 (1)", "■ 중복 (1)"):
@@ -291,3 +291,62 @@ def test_db_creates_folder_and_migrates_old_file(tmp_path):
     (old_dir / "photoai.db").write_text("again")   # 새 위치에 이미 있으면 덮어쓰지 않는다
     config.migrate_old_db(old_dir, new2)
     assert new2.read_text() == "x" and (old_dir / "photoai.db").exists()
+
+
+def _dup_setup(tmp_path, **kw):
+    st = settings(tmp_path, **kw)
+    return st, Path(st.source), Path(st.result), dbm.DB(tmp_path / "t.db")
+
+
+def test_duplicate_found_even_if_name_differs_and_skips_ai(tmp_path):
+    st, src, root, db = _dup_setup(tmp_path, check_same=True)
+    make_jpg(src / "A.jpg", "2021:02:16 19:17:25")
+    organizer.run(st, db, labeler=lambda p: "산책중")           # 정리됨: 20210216_191725_산책중.jpg
+    make_jpg(src / "B.jpg", "2021:02:16 19:17:25")              # 같은 내용의 사본
+    asked = []
+    res = organizer.run(st, db, labeler=lambda p: asked.append(p) or "가족사진")  # 설명어가 달라도(이름이 달라도)
+    assert res.duplicates == 1 and res.ok == 0 and asked == []  # 중복이라 AI 호출 없음
+    assert [x.name for x in (root / "중복파일").glob("*")] == ["B.jpg"]
+    assert res.dup_items == [("B.jpg", "B.jpg", "20210216_191725_산책중.jpg")]
+    assert [x.name for x in root.glob("*.jpg")] == ["20210216_191725_산책중.jpg"]
+
+
+def test_same_size_different_content_is_not_duplicate(tmp_path):
+    st, src, root, db = _dup_setup(tmp_path, check_same=True)
+    make_jpg(src / "A.jpg", "2021:02:16 19:17:25", color=(10, 20, 30))
+    make_jpg(src / "B.jpg", "2021:02:16 19:17:25", color=(200, 0, 0))
+    a, b = (src / "A.jpg").stat().st_size, (src / "B.jpg").stat().st_size
+    res = organizer.run(st, db)
+    assert res.duplicates == 0 and res.ok == 2, (a, b)
+
+
+def test_index_ignores_special_folders_and_prunes_missing(tmp_path):
+    st, src, root, db = _dup_setup(tmp_path, check_same=True)
+    for sub in (root, root / "분류불가", root / "중복파일"):
+        sub.mkdir(parents=True, exist_ok=True)
+    make_jpg(root / "keep.jpg", "2021:02:16 19:17:25")
+    make_jpg(root / "분류불가" / "u.jpg")
+    make_jpg(root / "중복파일" / "d.jpg", "2021:02:16 19:17:25")
+    organizer.index_folder(db, root)
+    paths = [p for p, in db._query("SELECT path FROM file_index")]
+    assert [Path(p).name for p in paths] == ["keep.jpg"]
+    (root / "keep.jpg").unlink()
+    organizer.index_folder(db, root)
+    assert db._query("SELECT COUNT(*) FROM file_index")[0][0] == 0
+
+
+def test_index_stores_metadata(tmp_path):
+    st, src, root, db = _dup_setup(tmp_path, check_same=True)
+    make_jpg(src / "A.jpg", "2021:02:16 19:17:25", (37.5, 126.6))
+    organizer.run(st, db)
+    row = db._query("SELECT taken,lat,lon,size FROM file_index")[0]
+    assert row[0] == "2021-02-16T19:17:25" and (round(row[1], 3), round(row[2], 3)) == (37.5, 126.6) and row[3] > 0
+
+
+def test_no_checksum_dedup_when_option_off(tmp_path):
+    st, src, root, db = _dup_setup(tmp_path, check_same=False)
+    make_jpg(src / "A.jpg", "2021:02:16 19:17:25")
+    organizer.run(st, db, labeler=lambda p: "산책중")
+    make_jpg(src / "B.jpg", "2021:02:16 19:17:25")
+    res = organizer.run(st, db, labeler=lambda p: "가족사진")
+    assert res.duplicates == 0 and res.ok == 1 and db._query("SELECT COUNT(*) FROM file_index")[0][0] == 0

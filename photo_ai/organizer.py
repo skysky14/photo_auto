@@ -84,8 +84,52 @@ def move_verified(src: Path, dst: Path) -> None:
     src.unlink()
 
 
+def index_folder(db, root: Path) -> None:
+    """정상 분류 폴더(root 바로 아래)의 파일 메타 정보를 DB에 저장한다. 바뀌지 않은 파일은 다시 읽지 않는다."""
+    keep = set()
+    for p in root.glob("*"):  # 분류불가/중복파일 하위 폴더는 보지 않는다
+        if p.is_file() and p.suffix.lower() in exif.IMAGE_EXTS:
+            s = p.stat()
+            keep.add(str(p))
+            if db.index_get(p) == (s.st_size, s.st_mtime):
+                continue
+            try:
+                taken, pos = exif.read_meta(p)
+            except Exception:
+                taken, pos = None, None
+            db.index_upsert(p, s.st_size, s.st_mtime, taken, pos)
+    db.index_prune(keep)
+
+
+def _find_duplicate(path: Path, db) -> tuple[Path | None, str | None]:
+    """색인된 정상 분류 파일 중 내용(SHA-256)이 같은 것. 크기가 같은 후보만 해시를 계산한다. (중복 대상, path의 해시)"""
+    size = path.stat().st_size
+    cands = [(Path(p), h) for p, h in db.index_by_size(size) if Path(p).exists() and Path(p) != path]
+    if not cands:
+        return None, None
+    mine = sha256(path)
+    for p, h in cands:
+        if h is None:
+            h = sha256(p)
+            db.index_set_sha(p, h)
+        if h == mine:
+            return p, mine
+    return None, mine
+
+
 def _process_one(path, st, root, db, job, geo, labeler, res):
     taken, pos = exif.read_meta(path)
+    dup_of = sha = None
+    if taken is not None and st.check_same:  # AI·장소 조회 전에 중복부터 가린다(느린 AI 호출을 아낀다)
+        dup_of, sha = _find_duplicate(path, db)
+    if dup_of:
+        dst, _ = choose_target(path, root / DUPLICATE, path.name, False)
+        existing, kind = dup_of.name, "duplicate"
+        move_verified(path, dst)
+        db.add_history(job, path, dst, kind)
+        log.info("%s → %s [%s] 동일 파일: %s", path, dst, kind, dup_of)
+        res.dup_items.append((path.name, dst.name, existing))
+        return kind
     if taken is None:  # 촬영일 없음 → 원본 이름 그대로 분류불가
         folder, name, kind = root / UNCLASSIFIED, path.name, "unclassified"
     else:
@@ -105,6 +149,9 @@ def _process_one(path, st, root, db, job, geo, labeler, res):
     db.add_history(job, path, dst, kind)
     log.info("%s → %s [%s]", path, dst, kind)
     if kind == "ok":
+        if st.check_same:  # 이후 파일의 중복 판별에 쓰도록 정상 분류된 파일의 메타 정보를 색인에 추가
+            s = dst.stat()
+            db.index_upsert(dst, s.st_size, s.st_mtime, taken, pos, sha)
         res.ok_items.append((path.name, dst.name))
     elif kind == "unclassified":
         res.unclassified_items.append(path.name)
@@ -119,6 +166,11 @@ def run(st, db, geo=None, labeler=None, progress=lambda i, n, path, msg: None, c
     root = Path(st.result)
     for sub in (root, root / UNCLASSIFIED, root / DUPLICATE):
         sub.mkdir(parents=True, exist_ok=True)
+    if st.check_same:
+        try:
+            index_folder(db, root)
+        except Exception:
+            log.exception("정리된 파일 색인 실패 (이름 기준 중복 검사만 합니다)")
     files = scan(Path(st.source), root, st.recursive)
     res = Result(job_id=job, found=len(files))
     log.info("작업 시작 job=%s 원본=%s 결과=%s 대상=%d장 geo=%s ai=%s", job, st.source, root, len(files), bool(geo), bool(labeler))

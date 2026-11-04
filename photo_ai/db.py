@@ -16,6 +16,10 @@ CREATE TABLE IF NOT EXISTS regions(
   id TEXT PRIMARY KEY, adm_cd TEXT NOT NULL, sgg TEXT NOT NULL, dong TEXT NOT NULL,
   minx REAL NOT NULL, miny REAL NOT NULL, maxx REAL NOT NULL, maxy REAL NOT NULL, geom TEXT NOT NULL,
   updated_at TEXT NOT NULL, synced INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS file_index(
+  id TEXT PRIMARY KEY, path TEXT UNIQUE NOT NULL, size INTEGER NOT NULL, mtime REAL NOT NULL, sha256 TEXT,
+  taken TEXT, lat REAL, lon REAL, updated_at TEXT NOT NULL, synced INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS ix_file_index_size ON file_index(size);
 CREATE TABLE IF NOT EXISTS stats(
   id TEXT PRIMARY KEY, day TEXT NOT NULL, name TEXT NOT NULL, value INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL, synced INTEGER NOT NULL DEFAULT 0, UNIQUE(day, name));
@@ -76,6 +80,32 @@ class DB:
             self.con.executemany(
                 "INSERT INTO regions(id,adm_cd,sgg,dong,minx,miny,maxx,maxy,geom,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                 [(_id(), *r, now) for r in rows])
+
+    # 정리된(정상 분류) 파일 색인: 중복 판별용. sha256은 필요할 때 계산해 채운다.
+    def index_get(self, path) -> tuple[int, float] | None:
+        rows = self._query("SELECT size,mtime FROM file_index WHERE path=?", (str(path),))
+        return rows[0] if rows else None
+
+    def index_upsert(self, path, size: int, mtime: float, taken, pos, sha: str | None = None) -> None:
+        lat, lon = pos if pos else (None, None)
+        self._exec(
+            "INSERT INTO file_index(id,path,size,mtime,sha256,taken,lat,lon,updated_at) VALUES(?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(path) DO UPDATE SET size=excluded.size, mtime=excluded.mtime, sha256=excluded.sha256, "
+            "taken=excluded.taken, lat=excluded.lat, lon=excluded.lon, updated_at=excluded.updated_at, synced=0",
+            (_id(), str(path), size, mtime, sha, taken.isoformat() if taken else None, lat, lon, _now()))
+
+    def index_by_size(self, size: int) -> list[tuple[str, str | None]]:
+        return self._query("SELECT path,sha256 FROM file_index WHERE size=?", (size,))
+
+    def index_set_sha(self, path, sha: str) -> None:
+        self._exec("UPDATE file_index SET sha256=?, updated_at=?, synced=0 WHERE path=?", (sha, _now(), str(path)))
+
+    def index_prune(self, keep: set[str]) -> None:
+        """색인에서 keep에 없는 경로(지워졌거나 옮겨진 파일)를 지운다."""
+        gone = [(p,) for (p,) in self._query("SELECT path FROM file_index") if p not in keep]
+        if gone:
+            with self.lock, self.con:
+                self.con.executemany("DELETE FROM file_index WHERE path=?", gone)
 
     # 통계
     def add_stat(self, name: str, n: int = 1) -> None:
