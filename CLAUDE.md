@@ -63,7 +63,8 @@ pyinstaller --noconfirm --clean --onefile --windowed --name PhotoAI --collect-al
 `./build.sh`는 같은 빌드를 하고 `dist/data/photoai.db`를 지워 DB를 초기화한다(개발 단계). `config.ini`와 `logs/`는 남긴다.
 Ollama가 별도로 실행 중이어야 하고 모델(`ollama pull gemma3:4b`)이 설치돼 있어야 AI 분석이 동작한다. AI가 없어도 앱은 "AI 미사용" 모드로 동작해야 한다.
 분석 중 취소·종료는 현재 사진까지 끝낸 뒤 멈춘다. AI 응답 시간 제한은 없고, 연속 2장 연결 오류면 작업을 멈춘다. Ollama가 꺼져 있으면 자동 실행한다.
-AI 모델은 화면 선택 상자(`ai.MODELS` 10개, 설치 여부 표시)에서 고르고, 미설치 모델은 확인 후 내려받는다. 목록 밖 모델과 원격 Ollama에는 자동 설치하지 않는다.
+AI 모델은 화면 콤보박스(`ai.MODELS` 10개, 설치 여부 표시)에서 고르거나 이름을 직접 입력(Enter)하고, 미설치 모델은 확인 후 내려받는다. 직접 입력은 `ai.valid_model_name`(Ollama 기본 라이브러리 이름만, `/`·다른 레지스트리 주소 불가)만 허용한다. 원격 Ollama에는 자동 설치하지 않는다.
+목록은 `gemma3:4b`(기본) → PC 사양 기준 ★추천 4개(`ai.recommend`, `hw.ram_gb`/`hw.nvidia_vram_gb`; NVIDIA 외 GPU는 CPU로 간주) → 나머지 순이다.
 시작할 때 Ollama/모델이 없으면 `ai.diagnose()`가 부족한 것을 알려 주고, 사용자가 동의하면 `ai.prepare()`가 설치(공식 `OllamaSetup.exe` 다운로드 후 `/SILENT`) → 실행 → 모델 `pull`을 진행한다. 원격 Ollama URL은 자동 설치하지 않는다.
 
 ## 구조

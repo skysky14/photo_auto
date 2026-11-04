@@ -1,6 +1,7 @@
 """Ollama 비전 모델로 사진 설명어 생성."""
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -50,6 +51,24 @@ MODEL_INFO = {
     "moondream": ("낮음", "약함", "매우 빠름", "아주 가벼움, 설명이 단순함"),
     "granite3.2-vision": ("보통", "보통", "빠른 편", "문서·표·차트에 강함"),
 }
+
+DEFAULT_MODEL = "gemma3:4b"  # 사양과 상관없이 맨 위에 두는 무난한 기본 모델
+_SCORE = {"낮음": 0, "약함": 0, "보통": 1, "보통~좋음": 1.5, "좋음": 2}
+
+
+def recommend(ram_gb: float | None, vram_gb: float | None, n: int = 4) -> list[str]:
+    """PC 사양에 맞는 추천 모델(기본 모델 제외). 모델 크기×1.5가 메모리 예산 안이어야 하고, GPU가 없으면 느린 모델은 뺀다.
+    사양을 모르면(None) 목록 앞쪽부터. 필요 사양은 대략적인 추정이다."""
+    budget = vram_gb if vram_gb else (ram_gb * 0.6 if ram_gb else None)
+    ok = []
+    for name, _, gb in MODELS:
+        info = MODEL_INFO[name]
+        if name == DEFAULT_MODEL or (budget is not None and gb * 1.5 > budget) or (not vram_gb and info[2] == "느린 편"):
+            continue
+        ok.append((name, _SCORE[info[0]] + _SCORE[info[1]]))
+    ok.sort(key=lambda t: -t[1])  # 정렬은 안정적이라 점수가 같으면 목록 순서
+    return [name for name, _ in ok[:n]]
+
 
 KEEP_ALIVE = "30m"  # 분석 사이 모델을 메모리에 유지하는 시간
 SETUP_URL = "https://ollama.com/download/OllamaSetup.exe"
@@ -103,6 +122,15 @@ def is_installed(names: set[str], model: str) -> bool:
 
 def model_size_gb(model: str) -> float:
     return next((g for n, _, g in MODELS if n == model), 0.0)
+
+
+# 직접 입력한 모델 이름: Ollama 기본 라이브러리 이름(이름[:태그])만 허용한다. '/'나 '.com' 같은 다른 레지스트리 주소는 막는다.
+_CUSTOM_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*(:[A-Za-z0-9._-]+)?")
+UNKNOWN_SIZE_GB = 8.0  # 목록 밖 모델은 크기를 몰라 넉넉히 잡는다
+
+
+def valid_model_name(name: str) -> bool:
+    return name in MODEL_NAMES or bool(_CUSTOM_NAME.fullmatch(name))
 
 
 def diagnose(url: str, model: str) -> str | None:
@@ -190,9 +218,9 @@ def _serve(url: str, progress) -> None:
 
 
 def _pull(url: str, model: str, progress) -> None:
-    if model not in MODEL_NAMES:  # 목록 밖 이름(오타·임의 레지스트리 주소)은 내려받지 않는다
-        raise RuntimeError(f"목록에 없는 모델 '{model}'은 자동 설치하지 않습니다. 직접 `ollama pull`로 설치하세요.")
-    need = model_size_gb(model) * 1.5 + 1  # shortcut: Ollama 모델 폴더를 홈 드라이브로 가정, OLLAMA_MODELS를 바꿨다면 틀림
+    if not valid_model_name(model):  # 임의 레지스트리 주소·이상한 이름은 내려받지 않는다
+        raise RuntimeError(f"모델 이름 '{model}'이 올바르지 않아 자동 설치하지 않습니다. 직접 `ollama pull`로 설치하세요.")
+    need = (model_size_gb(model) or UNKNOWN_SIZE_GB) * 1.5 + 1  # shortcut: Ollama 모델 폴더를 홈 드라이브로 가정, OLLAMA_MODELS를 바꿨다면 틀림
     if shutil.disk_usage(Path.home()).free < need * (1 << 30):
         raise RuntimeError(f"디스크 여유 공간이 부족합니다 (약 {need:.0f}GB 필요).")
     for ev in ollama.Client(host=url, timeout=None).pull(model, stream=True):

@@ -189,8 +189,21 @@ def test_ai_model_list_and_pull_guards(monkeypatch):
     assert not ai.is_installed({"gemma3:4b"}, "llava:7b")
     with pytest.raises(RuntimeError):  # 원격 Ollama에는 설치하지 않는다
         ai.pull_model("http://10.0.0.5:11434", "gemma3:4b", lambda *a: None)
-    with pytest.raises(RuntimeError):  # 목록 밖 이름은 내려받지 않는다
+    with pytest.raises(RuntimeError):  # 다른 레지스트리 주소는 내려받지 않는다
         ai._pull("http://localhost:11434", "evil.example.com/x/y", lambda *a: None)
+    assert ai.valid_model_name("phi3:mini") and ai.valid_model_name("granite3.2-vision")  # 직접 입력한 라이브러리 모델은 허용
+    assert not any(ai.valid_model_name(n) for n in ("", "a b", "x/y", "hf.co/u/m", "-x", "Gemma3"))
+
+
+def test_recommend_by_pc_spec():
+    from photo_ai import ai
+
+    r = ai.recommend(13.8, None)  # 이 PC: RAM 13.8GB, GPU 없음
+    assert len(r) == 4 and ai.DEFAULT_MODEL not in r and "minicpm-v:8b" not in r  # 느린 모델 제외
+    assert all(ai.model_size_gb(n) * 1.5 <= 13.8 * 0.6 for n in r)
+    assert set(ai.recommend(6, None)) <= {"moondream", "granite3.2-vision"}  # 메모리가 작으면 작은 모델만
+    assert len(ai.recommend(None, None)) == 4
+    assert "qwen2.5vl:7b" in ai.recommend(32, 12)  # GPU가 있으면 큰 모델도
 
 
 def test_installed_models_falls_back_to_disk(tmp_path, monkeypatch):
@@ -341,6 +354,28 @@ def test_index_stores_metadata(tmp_path):
     organizer.run(st, db)
     row = db._query("SELECT taken,lat,lon,size FROM file_index")[0]
     assert row[0] == "2021-02-16T19:17:25" and (round(row[1], 3), round(row[2], 3)) == (37.5, 126.6) and row[3] > 0
+
+
+def test_db_write_failure_after_move_does_not_count_as_failed(tmp_path):
+    st, src, root, db = _dup_setup(tmp_path, check_same=True)
+    make_jpg(src / "A.jpg", "2021:02:16 19:17:25")
+
+    def boom(*a):
+        raise RuntimeError("database is locked")
+    db.add_history = boom
+    res = organizer.run(st, db)
+    assert (res.ok, res.failed) == (1, 0) and (root / "20210216_191725.jpg").exists()
+
+
+def test_undo_restores_checksum_duplicate(tmp_path):
+    st, src, root, db = _dup_setup(tmp_path, check_same=True)
+    make_jpg(src / "A.jpg", "2021:02:16 19:17:25")
+    organizer.run(st, db)
+    make_jpg(src / "B.jpg", "2021:02:16 19:17:25")
+    res = organizer.run(st, db)
+    assert (root / "중복파일" / "B.jpg").exists()
+    assert organizer.undo(db, res.job_id) == (1, 0)
+    assert (src / "B.jpg").exists() and not (root / "중복파일" / "B.jpg").exists()
 
 
 def test_no_checksum_dedup_when_option_off(tmp_path):

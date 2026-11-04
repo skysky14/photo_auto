@@ -44,7 +44,7 @@ def _id() -> str:
 class DB:
     def __init__(self, path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.con = sqlite3.connect(path, check_same_thread=False)
+        self.con = sqlite3.connect(path, timeout=30, check_same_thread=False)  # DB 툴이 잠깐 잡고 있어도 기다린다
         self.lock = threading.Lock()
         with self.lock:
             self.con.execute("PRAGMA journal_mode=WAL")

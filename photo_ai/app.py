@@ -7,7 +7,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from . import ai, config, db as dbm, geo, log as logsetup, organizer
+from . import ai, config, db as dbm, geo, hw, log as logsetup, organizer
 
 log = logging.getLogger("photoai.app")
 
@@ -37,6 +37,8 @@ class App(ctk.CTk):
         self.quit_when_done = False
         self.last_result = None  # 마지막 분석 결과. 새 분석을 시작하면 지운다.
         self.installed: set[str] | None = None  # None: Ollama에 연결 불가(설치 여부 모름)
+        self.ram, self.vram = hw.ram_gb(), hw.nvidia_vram_gb()
+        self.recommended = ai.recommend(self.ram, self.vram)
         st = config.load()
         self.v = {
             "source": ctk.StringVar(value=st.source), "result": ctk.StringVar(value=st.result),
@@ -45,6 +47,7 @@ class App(ctk.CTk):
             "recursive": ctk.BooleanVar(value=st.recursive),
         }
         self._build()
+        self.protocol("WM_DELETE_WINDOW", self.on_quit)  # X 버튼도 [종료]와 같게(분석 중이면 현재 사진까지 끝내고 닫음)
         self.refresh_stats()
         self.after(100, self.poll)
 
@@ -60,8 +63,9 @@ class App(ctk.CTk):
             if browse:
                 ctk.CTkButton(f, text="찾기", width=60, command=lambda k=key: self.browse(k)).grid(row=r, column=2, padx=8)
         ctk.CTkLabel(f, text="AI 모델").grid(row=3, column=0, padx=8, pady=4, sticky="w")
-        self.model_menu = ctk.CTkOptionMenu(f, values=[], command=self.on_model, anchor="w")
+        self.model_menu = ctk.CTkComboBox(f, values=[], command=self.on_model)  # 목록에서 고르거나 직접 입력 후 Enter
         self.model_menu.grid(row=3, column=1, padx=4, sticky="ew")
+        self.model_menu._entry.bind("<Return>", lambda e: self.on_model(self.model_menu.get()))
         ctk.CTkButton(f, text="?", width=60, fg_color="gray40", command=self.show_model_help).grid(row=3, column=2, padx=8)
         self.refresh_models()
         if self.v["ai_enabled"].get():
@@ -130,18 +134,23 @@ class App(ctk.CTk):
             vals = (name, f"{gb:.1f}GB", *ai.MODEL_INFO[name])
             for c, v in enumerate(vals):
                 ctk.CTkLabel(grid, text=v, anchor="w").grid(row=r, column=c, padx=8, pady=2, sticky="w")
+        pc = f"내 PC: 메모리 {self.ram:.1f}GB" if self.ram else "내 PC: 메모리 확인 불가"
+        pc += f", NVIDIA GPU {self.vram:.0f}GB" if self.vram else ", 가속 가능한 GPU 없음(내장 GPU는 CPU로 간주)"
+        ctk.CTkLabel(win, text=f"{pc}  →  ★추천은 이 사양 기준의 대략적인 추정입니다.", anchor="w").pack(fill="x", padx=14)
         ctk.CTkLabel(win, justify="left", anchor="w", wraplength=720,
                      text="※ 직접 측정한 값이 아니라 일반적으로 알려진 평가입니다. 설명어는 한 단어라서 큰 모델이라고 결과가 크게 좋아지지는 않고, "
                           "속도는 PC(특히 GPU 유무)에 따라 크게 다릅니다. 같은 사진으로 바꿔 가며 [총 소요시간/평균]을 비교해 보세요."
                      ).pack(fill="x", padx=14, pady=(0, 12))
 
     def _model_label(self, name):
+        tag = "   (기본)" if name == ai.DEFAULT_MODEL else "   ★추천" if name in self.recommended else ""
         mark = "" if self.installed is None else ("   [설치됨]" if ai.is_installed(self.installed, name) else "   [미설치]")
-        return name + mark
+        return name + tag + mark
 
     def refresh_models(self):
         cur = self.v["ollama_model"].get()
-        names = ai.MODEL_NAMES + ([cur] if cur and cur not in ai.MODEL_NAMES else [])  # ini의 목록 밖 모델도 유지
+        first = [ai.DEFAULT_MODEL] + self.recommended  # 기본 → 추천 → 나머지 → 직접 입력한 모델
+        names = first + [n for n in ai.MODEL_NAMES if n not in first] + ([cur] if cur and cur not in ai.MODEL_NAMES else [])
         self.model_menu.configure(values=[self._model_label(n) for n in names])
         self.model_menu.set(self._model_label(cur))
 
@@ -167,16 +176,24 @@ class App(ctk.CTk):
         threading.Thread(target=lambda: self.q.put(("models", ai.installed_models(url))), daemon=True).start()
 
     def on_model(self, choice):
-        name = choice.split()[0]
+        if self.running:  # 작업 중에는 모델을 바꾸지 않는다
+            self.refresh_models()
+            return
+        parts = choice.split()
+        tags = {"(기본)", "★추천", "[설치됨]", "[미설치]"}  # 목록 라벨의 꼬리표만 허용, 그 밖의 공백 입력은 잘못된 이름
+        name = parts[0] if parts and set(parts[1:]) <= tags else ""
+        if not ai.valid_model_name(name):
+            messagebox.showwarning("모델 이름", "모델 이름은 Ollama 모델 이름(예: gemma3:4b)으로 입력하세요.\n영문 소문자·숫자와 . _ - 만, 선택적으로 :태그")
+            self.refresh_models()
+            return
         self.v["ollama_model"].set(name)
         self.refresh_models()
         url = self.v["ollama_url"].get()
         if self.running or self.installed is None or ai.is_installed(self.installed, name):
             return
-        if name not in ai.MODEL_NAMES:
-            return
         gb = ai.model_size_gb(name)
-        if not messagebox.askyesno("모델 설치", f"'{name}' 모델이 설치되어 있지 않습니다.\n약 {gb:.1f}GB를 내려받아 설치할까요?"):
+        size = f"약 {gb:.1f}GB" if gb else "크기를 알 수 없는(수 GB 이상일 수 있는)"
+        if not messagebox.askyesno("모델 설치", f"'{name}' 모델이 설치되어 있지 않습니다.\n{size} 모델을 내려받아 설치할까요?"):
             self.status.configure(text=f"'{name}'은 미설치 상태입니다. [분석 시작] 때 다시 물어봅니다.")
             return
         self.running = True
@@ -222,9 +239,9 @@ class App(ctk.CTk):
         if not self.running:
             self.destroy()
             return
-        if messagebox.askyesno("종료", "작업이 진행 중입니다.\n지금 처리 중인 사진까지 끝낸 뒤 종료할까요?"):
-            self.quit_when_done = True
-            self.on_cancel()
+        messagebox.showinfo("종료", "작업이 진행 중입니다.\n내려받기·처리 중인 작업을 끝낸 뒤 종료합니다.")
+        self.quit_when_done = True
+        self.on_cancel()
 
     def on_cancel(self):
         self.cancel.set()
@@ -259,6 +276,7 @@ class App(ctk.CTk):
                 self.status.configure(text="Ollama를 시작하는 중...")
                 self.running = True
                 self.btn_start.configure(state="disabled")
+                self.model_menu.configure(state="disabled")
                 threading.Thread(target=self._start_server_then_retry, args=(st.ollama_url,), daemon=True).start()
                 return
             if state == "unreachable":
@@ -281,6 +299,7 @@ class App(ctk.CTk):
         self.running = True
         self.btn_start.configure(state="disabled")
         self.btn_cancel.configure(state="normal")
+        self.model_menu.configure(state="disabled")  # 작업 중에는 모델을 바꾸지 못하게
         threading.Thread(target=self._worker, args=(st, prepare, fetch), daemon=True).start()
 
     def _worker(self, st, prepare=False, fetch=False):
@@ -325,12 +344,19 @@ class App(ctk.CTk):
                 elif m[0] == "retry":  # Ollama를 켠 뒤 분석 시작을 다시 이어간다
                     self.running = False
                     self.btn_start.configure(state="normal")
+                    self.model_menu.configure(state="normal")
+                    if self.quit_when_done:
+                        self.destroy()
+                        return
                     self.start()
                 elif m[0] == "models":
                     self.installed = m[1]
                     self.refresh_models()
                 elif m[0] == "pulled":
                     self.finish(f"모델 '{m[1]}' 설치 완료")
+                    if self.quit_when_done:
+                        self.destroy()
+                        return
                 elif m[0] == "prep":
                     self.status.configure(text=m[1])
                     if m[2] is not None:
@@ -353,6 +379,9 @@ class App(ctk.CTk):
                         return
                 else:
                     self.finish("오류")
+                    if self.quit_when_done:
+                        self.destroy()
+                        return
                     messagebox.showerror("오류", m[1])
         except queue.Empty:
             pass

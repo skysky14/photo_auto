@@ -117,6 +117,14 @@ def _find_duplicate(path: Path, db) -> tuple[Path | None, str | None]:
     return None, mine
 
 
+def _record(fn, *args) -> None:
+    """파일을 옮긴 뒤의 DB 기록. DB가 잠겨 실패해도 이미 옮긴 파일을 실패로 세지 않고 로그만 남긴다."""
+    try:
+        fn(*args)
+    except Exception:
+        log.exception("DB 기록 실패(파일은 이동됨): %s", args)
+
+
 def _process_one(path, st, root, db, job, geo, labeler, res):
     taken, pos = exif.read_meta(path)
     dup_of = sha = None
@@ -126,7 +134,7 @@ def _process_one(path, st, root, db, job, geo, labeler, res):
         dst, _ = choose_target(path, root / DUPLICATE, path.name, False)
         existing, kind = dup_of.name, "duplicate"
         move_verified(path, dst)
-        db.add_history(job, path, dst, kind)
+        _record(db.add_history, job, path, dst, kind)
         log.info("%s → %s [%s] 동일 파일: %s", path, dst, kind, dup_of)
         res.dup_items.append((path.name, dst.name, existing))
         return kind
@@ -146,12 +154,12 @@ def _process_one(path, st, root, db, job, geo, labeler, res):
         dst, _ = choose_target(path, root / DUPLICATE, name, False)
         kind = "duplicate"
     move_verified(path, dst)
-    db.add_history(job, path, dst, kind)
+    _record(db.add_history, job, path, dst, kind)
     log.info("%s → %s [%s]", path, dst, kind)
     if kind == "ok":
         if st.check_same:  # 이후 파일의 중복 판별에 쓰도록 정상 분류된 파일의 메타 정보를 색인에 추가
             s = dst.stat()
-            db.index_upsert(dst, s.st_size, s.st_mtime, taken, pos, sha)
+            _record(db.index_upsert, dst, s.st_size, s.st_mtime, taken, pos, sha)
         res.ok_items.append((path.name, dst.name))
     elif kind == "unclassified":
         res.unclassified_items.append(path.name)
@@ -184,9 +192,9 @@ def run(st, db, geo=None, labeler=None, progress=lambda i, n, path, msg: None, c
         try:
             kind = _process_one(path, st, root, db, job, geo, labeler, res)
             setattr(res, counters[kind], getattr(res, counters[kind]) + 1)
-            db.add_stat("processed")
+            _record(db.add_stat, "processed")
             if kind != "ok":
-                db.add_stat("duplicates" if kind == "duplicate" else "unclassified")
+                _record(db.add_stat, "duplicates" if kind == "duplicate" else "unclassified")
             progress(i, len(files), path, kind)
         except ai.AIUnavailable as e:  # 이 사진은 이동 전이라 원본 위치에 남아 있다
             res.cancelled, res.reason = True, str(e)
