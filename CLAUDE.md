@@ -61,7 +61,7 @@ pytest tests/test_core.py::test_pipeline   # 단일 테스트
 pyinstaller --noconfirm --clean --onefile --windowed --name PhotoAI --collect-all customtkinter --collect-all pillow_heif main.py   # dist/PhotoAI.exe
 ```
 `./build.sh`는 같은 빌드를 하고 `dist/data/photoai.db`를 지워 DB를 초기화한다(개발 단계). `config.ini`와 `logs/`는 남긴다.
-`./package.sh [버전]`은 `dist/PhotoAI.exe` 하나만 `release/PhotoAI-<버전>-portable.zip`으로 묶는다(먼저 `./build.sh`). 설치형·다른 OS는 추후 개발.
+`./package.sh [버전]`은 `dist/PhotoAI.exe` 하나만 `release/PhotoAI-<버전>-portable.zip`으로 묶는다(내부에서 `./build.sh`를 먼저 실행). 설치형·다른 OS는 추후 개발.
 Ollama가 별도로 실행 중이어야 하고 모델(`ollama pull gemma3:4b`)이 설치돼 있어야 AI 분석이 동작한다. AI가 없어도 앱은 "AI 미사용" 모드로 동작해야 한다.
 분석 중 취소·종료는 현재 사진까지 끝낸 뒤 멈춘다. AI 응답 시간 제한은 없고, 연속 2장 연결 오류면 작업을 멈춘다. Ollama가 꺼져 있으면 자동 실행한다.
 AI 모델은 화면 콤보박스(`ai.MODELS` 10개, 설치 여부 표시)에서 고르거나 이름을 직접 입력(Enter)하고, 미설치 모델은 확인 후 내려받는다. 직접 입력은 `ai.valid_model_name`(Ollama 기본 라이브러리 이름만, `/`·다른 레지스트리 주소 불가)만 허용한다. 원격 Ollama에는 자동 설치하지 않는다.

@@ -1,6 +1,7 @@
 #!/bin/sh
-# 포터블 zip 만들기. 먼저 ./build.sh. 사용: ./package.sh [버전]
+# 포터블 zip 만들기(내부에서 ./build.sh로 먼저 빌드). 사용: ./package.sh [버전]
 cd "$(dirname "$0")" || exit 1
+./build.sh || exit 1
 V=${1:-0.1.0}
 mkdir -p release
 python3 - "$V" <<'PY' || exit 1
