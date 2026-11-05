@@ -77,8 +77,6 @@ class App(ctk.CTk):
         ctk.CTkCheckBox(opts, text="AI 사용", variable=self.v["ai_enabled"]).pack(side="left", padx=10, pady=8)
         ctk.CTkCheckBox(opts, text="동일 파일 검사", variable=self.v["check_same"]).pack(side="left", padx=10)
         ctk.CTkCheckBox(opts, text="하위 폴더 포함", variable=self.v["recursive"]).pack(side="left", padx=10)
-        self.refetch = ctk.BooleanVar(value=False)  # 저장하지 않는 일회성 선택
-        ctk.CTkCheckBox(opts, text="행정구역 데이터 다시 받기", variable=self.refetch).pack(side="left", padx=10)
         self.btn_result = ctk.CTkButton(opts, text="결과", width=70, state="disabled", command=self.show_result)
         self.btn_result.pack(side="left", padx=10)
 
@@ -291,8 +289,7 @@ class App(ctk.CTk):
                 if ans is None:
                     return
                 prepare, st.ai_enabled = ans, ans
-        fetch = self.db.region_count() == 0 or self.refetch.get()  # 없으면 무조건, 있으면 체크했을 때만
-        self.refetch.set(False)
+        fetch = self.db.regions_stale()  # 없거나 받은 지 30일이 넘으면 받는다
         config.save(self.settings())
         self.reset_results()
         self.cancel.clear()
@@ -322,7 +319,8 @@ class App(ctk.CTk):
                     log.exception("AI 모델 미리 불러오기 실패 (분석은 계속 시도)")
             g = geo.Geo(self.db) if self.db.region_count() else None
             lab = ai.make_labeler(st.ollama_url, st.ollama_model) if st.ai_enabled else None
-            res = organizer.run(st, self.db, g, lab, lambda *a: self.q.put(("p", *a)), self.cancel)
+            res = organizer.run(st, self.db, g, lab, lambda *a: self.q.put(("p", *a)), self.cancel,
+                               on_result=lambda r: self.q.put(("live", r)))
             self.q.put(("done", res))
         except Exception as e:
             log.exception("작업 스레드 오류")
@@ -349,6 +347,9 @@ class App(ctk.CTk):
                         self.destroy()
                         return
                     self.start()
+                elif m[0] == "live":  # 분석 중에도 [결과]로 지금까지 옮긴 파일을 볼 수 있게
+                    self.last_result = m[1]
+                    self.btn_result.configure(state="normal")
                 elif m[0] == "models":
                     self.installed = m[1]
                     self.refresh_models()

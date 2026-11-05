@@ -25,18 +25,18 @@ def settings(tmp_path, **kw):
 def test_clean_label():
     assert namer.clean_label("산책중\n설명") == "산책중"
     assert namer.clean_label('"가족 사진!"') == "가족사진"
-    assert namer.clean_label("열한글자를넘는설명어입니다만") == "열한글자를넘는설명어" and len(namer.clean_label("가" * 50)) == 10
+    assert namer.clean_label("스물한글자를넘는설명어입니다만이것은아주긴문장") == "스물한글자를넘는설명어입니다만이것은아주" and len(namer.clean_label("가" * 50)) == 20
     assert namer.clean_label("") is None
 
 
 def test_place_name():
-    assert namer.place_name("연수구", "송도동") == "연수구송도동"
-    assert namer.place_name("수원시 영통구", "영통동") == "수원시영통구영통동"[-10:]
+    assert namer.place_name("연수구") == "연수구"
+    assert namer.place_name("수원시 영통구") == "수원시영통구"
 
 
 def test_build_name_variants():
     t = datetime(2021, 2, 16, 19, 17, 25)
-    assert namer.build_name(t, "연수구송도동", "산책중", ".JPG") == "20210216_191725_연수구송도동_산책중.jpg"
+    assert namer.build_name(t, "연수구", "산책중", ".JPG") == "20210216_191725_연수구_산책중.jpg"
     assert namer.build_name(t, None, "가족사진", ".jpg") == "20210216_191725_가족사진.jpg"
     assert namer.build_name(t, None, None, ".jpg") == "20210216_191725.jpg"
 
@@ -59,15 +59,15 @@ def geojson():
         return {"type": "Feature", "properties": {"adm_nm": nm, "sggnm": sgg, "adm_cd": "1"},
                 "geometry": {"type": "MultiPolygon", "coordinates": coords}}
     return {"features": [feat("서울특별시 연수구 송도1·4동", "연수구", [[SQUARE, HOLE]]),  # 구멍이 있는 동
-                         feat("서울특별시 연수구 송도2동", "연수구", [[[[4, 4], [6, 4], [6, 6], [4, 6], [4, 4]]]])]}  # 구멍 자리를 채운 동
+                         feat("서울특별시 미추홀구 도화2동", "미추홀구", [[[[4, 4], [6, 4], [6, 6], [4, 6], [4, 4]]]])]}  # 구멍 자리를 채운 동
 
 
 def test_geo_place(tmp_path):
     db = dbm.DB(tmp_path / "t.db")
     db.replace_regions(geo.parse_geojson(geojson()))
     g = geo.Geo(db)  # 좌표는 (lon=x, lat=y)
-    assert g.place(lat=2, lon=2) == "연수구송도1.4동"    # 안쪽, 가운뎃점은 .으로
-    assert g.place(lat=5, lon=5) == "연수구송도2동"      # 1동의 구멍 안은 2동
+    assert g.place(lat=2, lon=2) == "연수구"    # 안쪽(시구군만 쓴다)
+    assert g.place(lat=5, lon=5) == "미추홀구"      # 연수구 구멍 안은 다른 구
     assert g.place(lat=2, lon=11) is None                # 경계 밖
     assert g.place(lat=11, lon=2) is None
     hits, miss = db.stats()[1]["geo_hits"], db.stats()[1]["geo_miss"]
@@ -111,14 +111,14 @@ def test_pipeline(tmp_path):
     assert sorted(x.name for x in root.glob("*.jpg")) == ["20210216_191725_산책중.jpg", "20210216_191725_산책중_001.jpg"]
     assert [x.name for x in (root / "중복파일").glob("*")] == ["IMG_2.jpg"]  # 중복은 원본 이름 그대로
     assert (root / "분류불가" / "no_date.jpg").exists()
-    assert (src / "broken.jpg").exists()  # 실패 파일은 원본 유지
+    assert (root / "실패" / "broken.jpg").exists() and not (src / "broken.jpg").exists()  # 실패 파일은 실패 폴더로
     assert (res.ok, res.unclassified, res.duplicates, res.failed) == (2, 1, 1, 1)
     today, total = db.stats()
     assert total["processed"] == 4 and total["ai_success"] == 2 and total["failed"] == 1  # 중복은 AI를 건너뜀
 
     # 되돌리기
     done, skipped = organizer.undo(db, res.job_id)
-    assert done == 4 and skipped == 0
+    assert done == 5 and skipped == 0  # 실패 폴더로 옮긴 파일도 되돌린다
     assert (src / "IMG_1.jpg").exists() and (src / "no_date.jpg").exists()
 
     # 재실행해도 결과 폴더는 다시 스캔되지 않는다
@@ -385,3 +385,17 @@ def test_no_checksum_dedup_when_option_off(tmp_path):
     make_jpg(src / "B.jpg", "2021:02:16 19:17:25")
     res = organizer.run(st, db, labeler=lambda p: "가족사진")
     assert res.duplicates == 0 and res.ok == 1 and db._query("SELECT COUNT(*) FROM file_index")[0][0] == 0
+
+
+def test_failed_file_undo_and_live_result_and_region_stale(tmp_path):
+    st, src, root, db = _dup_setup(tmp_path, check_same=False)
+    (src / "broken.jpg").write_bytes(b"not an image")
+    live = []
+    res = organizer.run(st, db, on_result=live.append)
+    assert live == [res] and res.failed == 1 and (root / "실패" / "broken.jpg").exists()  # 결과 객체를 시작하자마자 받는다
+    assert organizer.undo(db, res.job_id) == (1, 0) and (src / "broken.jpg").exists()      # 실패 폴더로 옮긴 것도 되돌린다
+    assert db.regions_stale()                                                              # 데이터가 없으면 받아야 한다
+    db.replace_regions(geo.parse_geojson(geojson()))
+    assert not db.regions_stale()
+    db.con.execute("UPDATE regions SET updated_at='2000-01-01T00:00:00'")
+    assert db.regions_stale()                                                              # 30일이 지나면 다시 받는다

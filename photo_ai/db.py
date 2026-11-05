@@ -2,7 +2,7 @@
 import sqlite3
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 STAT_NAMES = (
@@ -64,6 +64,11 @@ class DB:
     # 행정동 경계 (geo.download_regions가 채운다)
     def region_count(self) -> int:
         return self._query("SELECT COUNT(*) FROM regions")[0][0]
+
+    def regions_stale(self, days: int = 30) -> bool:
+        """행정구역 데이터가 없거나 받은 지 days일이 넘었으면 True."""
+        got = self._query("SELECT MAX(updated_at) FROM regions")[0][0]
+        return got is None or datetime.fromisoformat(got) < datetime.now() - timedelta(days=days)
 
     def region_bboxes(self) -> list[tuple]:
         return self._query("SELECT id,minx,miny,maxx,maxy FROM regions")

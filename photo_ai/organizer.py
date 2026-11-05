@@ -11,7 +11,7 @@ from pathlib import Path
 from . import ai, exif, namer
 
 log = logging.getLogger("photoai.organizer")
-DONE, UNCLASSIFIED, DUPLICATE = "정리완료", "분류불가", "중복파일"
+DONE, UNCLASSIFIED, DUPLICATE, FAILED = "정리완료", "분류불가", "중복파일", "실패"
 
 
 @dataclass
@@ -125,6 +125,18 @@ def _record(fn, *args) -> None:
         log.exception("DB 기록 실패(파일은 이동됨): %s", args)
 
 
+def _to_failed(path: Path, root: Path, db, job: str) -> None:
+    """실패한 파일을 결과 폴더의 실패 폴더로 옮긴다(되돌리기 가능). 옮기지 못하면 원본 위치에 그대로 둔다."""
+    try:
+        if not path.exists():  # 이미 옮겨진 뒤에 난 오류
+            return
+        dst, _ = choose_target(path, root / FAILED, path.name, False)
+        move_verified(path, dst)
+        _record(db.add_history, job, path, dst, "failed")
+    except Exception:
+        log.exception("실패 파일을 실패 폴더로 옮기지 못함(원본 위치에 둠): %s", path)
+
+
 def _process_one(path, st, root, db, job, geo, labeler, res):
     taken, pos = exif.read_meta(path)
     dup_of = sha = None
@@ -168,8 +180,9 @@ def _process_one(path, st, root, db, job, geo, labeler, res):
     return kind
 
 
-def run(st, db, geo=None, labeler=None, progress=lambda i, n, path, msg: None, cancel=None) -> Result:
-    """st: config.Settings. geo/labeler가 None이면 해당 단계는 건너뛴다."""
+def run(st, db, geo=None, labeler=None, progress=lambda i, n, path, msg: None, cancel=None,
+        on_result=lambda res: None) -> Result:
+    """st: config.Settings. geo/labeler가 None이면 해당 단계는 건너뛴다. on_result: 결과 객체를 만들자마자 한 번 받는다(진행 중에도 목록을 볼 수 있게)."""
     job = uuid.uuid4().hex
     root = Path(st.result)
     for sub in (root, root / UNCLASSIFIED, root / DUPLICATE):
@@ -181,6 +194,7 @@ def run(st, db, geo=None, labeler=None, progress=lambda i, n, path, msg: None, c
             log.exception("정리된 파일 색인 실패 (이름 기준 중복 검사만 합니다)")
     files = scan(Path(st.source), root, st.recursive)
     res = Result(job_id=job, found=len(files))
+    on_result(res)
     log.info("작업 시작 job=%s 원본=%s 결과=%s 대상=%d장 geo=%s ai=%s", job, st.source, root, len(files), bool(geo), bool(labeler))
     t0 = time.time()
     counters = {"ok": "ok", "unclassified": "unclassified", "duplicate": "duplicates"}
@@ -200,12 +214,13 @@ def run(st, db, geo=None, labeler=None, progress=lambda i, n, path, msg: None, c
             res.cancelled, res.reason = True, str(e)
             log.error("AI 응답 없음으로 작업을 멈춤: %s", e)
             break
-        except Exception as e:  # 실패 파일은 원본 위치에 남는다
+        except Exception as e:  # 실패 파일은 실패 폴더로 옮긴다(옮기지 못하면 원본 위치에 남는다)
             res.failed += 1
             res.failed_items.append(path.name)
             db.add_stat("failed")
             db.log(job, "error", f"{path}: {e}")
             log.exception("처리 실패: %s", path)
+            _to_failed(path, root, db, job)
             progress(i, len(files), path, f"failed: {e}")
     res.total_sec = time.time() - t0
     n = res.ok + res.unclassified + res.duplicates + res.failed

@@ -18,8 +18,9 @@ from PIL import Image, ImageOps
 from . import namer
 
 log = logging.getLogger("photoai.ai")
-PROMPT = ("이 사진의 상황을 한국어 10자 이내로 말해라. "
-          "전체적인 상황을 잘 파악 해서 사람중심의 분위기를 말해라.")
+PROMPT = ("이 사진의 상황을 한국어 20자 이내로 말해라. "
+          "전체적인 상황을 잘 파악 해서 사람중심의 분위기를 말해라. "
+          "단어만 출력하고 공백·기호·설명은 쓰지 마라.")
 
 
 # 화면 선택 목록이자 자동 다운로드 허용 목록. (모델, 설명, 내려받기 크기 GB 대략)

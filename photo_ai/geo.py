@@ -83,7 +83,7 @@ class Geo:
             if minx <= lon <= maxx and miny <= lat <= maxy:
                 if rid not in self._cache:
                     sgg, dong, geom = self.db.region_geom(rid)
-                    self._cache[rid] = (namer.place_name(sgg, dong), json.loads(geom))
+                    self._cache[rid] = (namer.place_name(sgg), json.loads(geom))
                 name, polys = self._cache[rid]
                 if _in_polys(lon, lat, polys):
                     self.db.add_stat("geo_hits")
